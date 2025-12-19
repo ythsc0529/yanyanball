@@ -147,13 +147,16 @@ function setupEventListeners() {
     if (elements.sortSelect) elements.sortSelect.addEventListener('change', updateList);
 
     // Logout
-    if (elements.logoutBtn) {
-        elements.logoutBtn.addEventListener('click', async () => {
-            if (currentUser?.isAnonymous) localStorage.removeItem('guestMode');
-            else await logout();
-            window.location.href = '/index.html';
-        });
-    }
+    const logoutAction = async () => {
+        if (currentUser?.isAnonymous) localStorage.removeItem('guestMode');
+        else await logout();
+        window.location.href = '/index.html';
+    };
+
+    if (elements.logoutBtn) elements.logoutBtn.addEventListener('click', logoutAction);
+
+    const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+    if (mobileLogoutBtn) mobileLogoutBtn.addEventListener('click', logoutAction);
 
     // Navigation (Desktop Sidebar & Mobile Bottom Nav)
     document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(link => {
