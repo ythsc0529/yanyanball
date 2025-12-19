@@ -12,6 +12,7 @@ let currentUser = null;
 let currentView = 'vocabulary';
 let displayedWords = [];
 let starredWords = new Set(JSON.parse(localStorage.getItem('starredWords') || '[]'));
+let masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || '[]'));
 const EXAM_DATE = '2026-01-17T09:00:00';
 const ITEMS_PER_PAGE = 20;
 let currentPage = 1;
@@ -82,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPaginationList();
 
     setupEventListeners();
+    updateStreak();
 });
 
 function checkAuth() {
@@ -526,6 +528,8 @@ function renderPlacementIntro() {
     `;
 }
 
+window.handleNavigation = handleNavigation;
+
 window.startQuiz = (type, customPool = null) => {
     quizState.type = type;
     quizState.active = true;
@@ -605,6 +609,11 @@ window.submitAnswer = (btn, selected, correct) => {
     if (selected === correct) {
         btn.classList.add('correct');
         quizState.score++;
+        // Add to mastered words if correct in non-placement quiz
+        if (quizState.type !== 'placement') {
+            masteredWords.add(quizState.questions[quizState.index].target.id);
+            localStorage.setItem('masteredWords', JSON.stringify([...masteredWords]));
+        }
         window.speak(quizState.questions[quizState.index].target.word);
     } else {
         btn.classList.add('wrong');
@@ -676,14 +685,31 @@ function finishQuiz() {
 
 function renderLearningDashboard(result) {
     const dailyWords = getPersonalizedWords(result.level);
+    const streakData = JSON.parse(localStorage.getItem('streakData') || '{"count":0, "lastDate":"", "max":0}');
+    const estimatedVocabulary = calculateVocabularyLevel();
 
     elements.wordList.innerHTML = `
         <div class="quiz-container">
              <div class="quiz-card" style="text-align:left;">
-                <h3>📊 學習中心</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <h3 style="margin:0;">📊 學習中心</h3>
+                    <div style="font-size:1.5rem;">🔥 <span style="font-weight:bold; color:var(--color-primary);">${streakData.count}</span> 天連續</div>
+                </div>
+                
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <span class="pos-tag" style="font-size:1rem; background:var(--color-primary); color:white;">等級：${result.level} (測驗分數: ${result.score})</span>
+                    <span class="pos-tag" style="font-size:1rem; background:var(--color-primary); color:white;">等級：${result.level}</span>
                     <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 8px;" onclick="localStorage.removeItem('placementTestResult'); checkPlacementTest();">重新分級</button>
+                </div>
+
+                <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px; gap: 10px;">
+                    <div class="stat-card" style="padding: 10px;">
+                        <div style="font-size: 0.8rem; color: #666;">預估單字量</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--color-primary);">${estimatedVocabulary}</div>
+                    </div>
+                    <div class="stat-card" style="padding: 10px;">
+                        <div style="font-size: 0.8rem; color: #666;">精通單字</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--color-success);">${masteredWords.size}</div>
+                    </div>
                 </div>
 
                 <div style="background:#f0f2f5; padding:20px; border-radius:12px; margin-bottom:20px;">
@@ -754,6 +780,10 @@ function loadStarredWords() {
 window.openModal = openModal;
 window.checkPlacementTest = checkPlacementTest;
 window.toggleStar = toggleStar;
+window.startQuiz = startQuiz;
+window.startRetest = startRetest;
+window.starIncorrectWords = starIncorrectWords;
+window.handleNavigation = handleNavigation;
 
 function toggleStar(id) {
     if (starredWords.has(id)) starredWords.delete(id);
@@ -783,6 +813,30 @@ function toggleStar(id) {
         currentPage = 1;
         renderPaginationList();
     }
+}
+
+// ================= STREAK LOGIC =================
+function updateStreak() {
+    const now = new Date();
+    const todayStr = now.toDateString();
+    let streakData = JSON.parse(localStorage.getItem('streakData') || '{"count":0, "lastDate":"", "max":0}');
+
+    if (streakData.lastDate === todayStr) return;
+
+    const lastDate = streakData.lastDate ? new Date(streakData.lastDate) : null;
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+
+    if (lastDate && lastDate.toDateString() === yesterday.toDateString()) {
+        streakData.count++;
+    } else {
+        streakData.count = 1;
+    }
+
+    streakData.lastDate = todayStr;
+    if (streakData.count > streakData.max) streakData.max = streakData.count;
+
+    localStorage.setItem('streakData', JSON.stringify(streakData));
 }
 
 // ================= PROFILE PAGE =================
@@ -821,6 +875,18 @@ function renderProfile() {
                 
                 <div class="stats-grid">
                     <div class="stat-card">
+                        <div class="stat-icon">🔥</div>
+                        <div class="stat-value">${JSON.parse(localStorage.getItem('streakData') || '{"count":0}').count}</div>
+                        <div class="stat-label">連續天數</div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">🏆</div>
+                        <div class="stat-value">${JSON.parse(localStorage.getItem('streakData') || '{"max":0}').max}</div>
+                        <div class="stat-label">最高紀錄</div>
+                    </div>
+
+                    <div class="stat-card">
                         <div class="stat-icon">📊</div>
                         <div class="stat-value">${estimatedVocabulary}</div>
                         <div class="stat-label">預估單字量</div>
@@ -830,18 +896,6 @@ function renderProfile() {
                         <div class="stat-icon">⭐</div>
                         <div class="stat-value">${starredWords.size}</div>
                         <div class="stat-label">收藏單字</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">📚</div>
-                        <div class="stat-value">${vocabularyDatabase.length}</div>
-                        <div class="stat-label">總單字數</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">🎯</div>
-                        <div class="stat-value">${calculateProgress()}%</div>
-                        <div class="stat-label">完成度</div>
                     </div>
                 </div>
                 
@@ -855,11 +909,18 @@ function renderProfile() {
 }
 
 function calculateVocabularyLevel() {
-    // Simple estimation based on starred words and assumed knowledge
-    const starredCount = starredWords.size;
-    // Assume user knows Level 1-2 words plus starred words
-    const level1And2 = vocabularyDatabase.filter(w => w.level <= 2).length;
-    return level1And2 + starredCount;
+    const placement = JSON.parse(localStorage.getItem('placementTestResult') || 'null');
+    let base = 0;
+    if (placement) {
+        if (placement.level.includes('Master')) base = 5000;
+        else if (placement.level.includes('Advanced')) base = 3000;
+        else base = 1000;
+    }
+
+    // Add mastered words (words answered correctly in quizzes)
+    const uniqueMastered = masteredWords.size;
+
+    return base + uniqueMastered;
 }
 
 function calculateProgress() {
