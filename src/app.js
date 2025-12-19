@@ -4,6 +4,7 @@ import { vocabularyDatabase } from './data';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Countdown } from './utils/countdown.js';
+import { NotificationManager } from './notifications.js';
 
 console.log("App.js loaded v4");
 
@@ -16,6 +17,11 @@ let masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || 
 const EXAM_DATE = '2026-01-17T09:00:00';
 const ITEMS_PER_PAGE = 20;
 let currentPage = 1;
+const notificationManager = new NotificationManager();
+
+// Learning Progress State
+let learnedToday = new Set(JSON.parse(localStorage.getItem('learnedToday') || '[]'));
+let dailyTestDone = localStorage.getItem('dailyTestDone') === new Date().toDateString();
 
 // Definition Cache
 const cachedDefinitions = JSON.parse(localStorage.getItem('cachedDefinitions') || '{}');
@@ -135,11 +141,21 @@ function updateUIForUser(user) {
         const mobileUserInfo = document.getElementById('mobile-user-info');
         if (mobileUserInfo) mobileUserInfo.textContent = user.displayName;
     }
-    if (user.isAnonymous && elements.vipLink) {
-        elements.vipLink.style.opacity = '0.5';
-        elements.vipLink.querySelector('span').nextSibling.textContent = ' 雁雁球學習 (限會員)';
-        elements.vipLink.style.pointerEvents = 'none';
-        elements.vipLink.title = "請登入以使用此功能";
+    if (user.isAnonymous) {
+        // Handle Sidebar VIP Link
+        if (elements.vipLink) {
+            elements.vipLink.style.opacity = '0.5';
+            elements.vipLink.querySelector('span').nextSibling.textContent = ' 雁雁球學習 (限會員)';
+            elements.vipLink.style.pointerEvents = 'none';
+            elements.vipLink.title = "請登入以使用此功能";
+        }
+        // Handle Mobile Bottom Nav VIP Link
+        const mobileVipLink = document.querySelector('.bottom-nav-item[data-view="learning"]');
+        if (mobileVipLink) {
+            mobileVipLink.style.opacity = '0.5';
+            mobileVipLink.style.pointerEvents = 'none';
+            mobileVipLink.title = "請登入以使用此功能";
+        }
     }
 }
 
@@ -226,6 +242,18 @@ function updateList() {
 
 function handleNavigation(view) {
     const title = document.querySelector('h2');
+    // Guest Access Security
+    if (view === 'learning' && currentUser?.isAnonymous) {
+        alert('請先登入以使用雁雁球學習功能！');
+        handleNavigation('vocabulary');
+        // Update active states
+        document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => {
+            if (l.dataset.view === 'vocabulary') l.classList.add('active');
+            else l.classList.remove('active');
+        });
+        return;
+    }
+
     elements.wordList.innerHTML = '';
     elements.wordList.className = ''; // Reset classes
 
@@ -382,6 +410,8 @@ function openModal(item) {
             if (el) el.innerText = def;
         });
     }
+
+    markWordAsLearned(item.id);
 
     elements.modalBody.innerHTML = `
         <div style="text-align:center; margin-bottom:20px;">
@@ -561,9 +591,26 @@ window.startQuiz = (type, customPool = null) => {
     quizState.questions = selected.map(target => {
         const others = vocabularyDatabase.filter(w => w.id !== target.id);
         others.sort(() => Math.random() - 0.5);
+
+        // Randomly pick a question type
+        const types = ['TRANS_EN_ZH', 'TRANS_ZH_EN', 'LISTENING', 'SPELLING'];
+        const qType = types[Math.floor(Math.random() * types.length)];
+
         const options = [target.definition, others[0]?.definition, others[1]?.definition, others[2]?.definition];
+        if (qType === 'TRANS_ZH_EN' || qType === 'LISTENING') {
+            options[0] = target.word;
+            options[1] = others[0]?.word;
+            options[2] = others[1]?.word;
+            options[3] = others[2]?.word;
+        }
         options.sort(() => Math.random() - 0.5);
-        return { target, options, correct: target.definition };
+
+        return {
+            target,
+            options,
+            correct: (qType === 'TRANS_ZH_EN' || qType === 'LISTENING') ? target.word : target.definition,
+            qType
+        };
     });
 
     renderQuestion();
@@ -578,22 +625,71 @@ function renderQuestion() {
 
     const q = quizState.questions[quizState.index];
     const total = quizState.questions.length;
-    const title = quizState.type === 'placement' ? '分級測試' : '隨機測驗';
+    let title = '測驗區';
+    if (quizState.type === 'placement') title = '分級測試';
+    if (quizState.type === 'daily') title = '今日測驗';
+
+    let questionHtml = '';
+    if (q.qType === 'TRANS_EN_ZH') {
+        questionHtml = `
+            <h4 style="color:#666; margin-bottom:10px;">請選擇正確的中文意思：</h4>
+            <h2 style="font-size:clamp(1.5rem, 8vw, 2.5rem); margin-bottom:30px;">${q.target.word}</h2>
+            <div class="quiz-options">
+                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
+            </div>
+        `;
+    } else if (q.qType === 'TRANS_ZH_EN') {
+        questionHtml = `
+            <h4 style="color:#666; margin-bottom:10px;">請選擇正確的英文單字：</h4>
+            <h2 style="font-size:clamp(1.2rem, 6vw, 2rem); margin-bottom:30px;">${q.target.definition}</h2>
+            <div class="quiz-options">
+                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
+            </div>
+        `;
+    } else if (q.qType === 'LISTENING') {
+        questionHtml = `
+            <h4 style="color:#666; margin-bottom:10px;">聽音辨義：</h4>
+            <div style="margin-bottom:30px;">
+                <button class="btn btn-primary" style="font-size:2rem; padding:20px 30px; border-radius:50%;" onclick="window.speak('${q.target.word}')">🔊</button>
+            </div>
+            <div class="quiz-options">
+                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
+            </div>
+        `;
+        // Auto play audio
+        setTimeout(() => window.speak(q.target.word), 500);
+    } else if (q.qType === 'SPELLING') {
+        questionHtml = `
+            <h4 style="color:#666; margin-bottom:10px;">請拼寫出該單字：</h4>
+            <h2 style="font-size:clamp(1.2rem, 6vw, 2rem); margin-bottom:10px;">${q.target.definition}</h2>
+            <p style="color:#999; margin-bottom:20px;">提示：${q.target.word[0]}${'.'.repeat(q.target.word.length - 1)} (${q.target.word.length} 個字母)</p>
+            <div style="margin-bottom:20px;">
+                <input type="text" id="spelling-input" class="search-input" style="font-size:1.5rem; text-align:center; letter-spacing:2px;" autocomplete="off" autofocus>
+            </div>
+            <button class="btn btn-primary" style="width:100%;" onclick="submitSpelling()">提交答案</button>
+        `;
+        // Auto focus
+        setTimeout(() => {
+            const input = document.getElementById('spelling-input');
+            if (input) {
+                input.focus();
+                input.onkeyup = (e) => { if (e.key === 'Enter') submitSpelling(); };
+            }
+        }, 300);
+    }
 
     elements.wordList.innerHTML = `
         <div class="quiz-container">
             <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
                 <span style="font-weight:bold;">${title}</span>
+                <div style="flex:1; height:8px; background:#eee; margin:0 20px; border-radius:4px; overflow:hidden;">
+                    <div style="width:${((quizState.index + 1) / total) * 100}%; height:100%; background:var(--color-primary); transition:width 0.3s;"></div>
+                </div>
                 <span style="color:#999;">${quizState.index + 1} / ${total}</span>
             </div>
             
             <div class="quiz-card">
-                <h2 style="font-size:clamp(1.5rem, 8vw, 2.5rem); margin-bottom:30px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">${q.target.word}</h2>
-                <div class="quiz-options">
-                    ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
-                    <button class="option-btn not-sure" onclick="submitAnswer(this, 'DONT_KNOW', '${q.correct}')">不知道 (I don't know)</button>
-                </div>
-                
+                ${questionHtml}
                 <div style="margin-top:30px; border-top:1px solid #eee; padding-top:20px;">
                     <button class="btn btn-secondary" onclick="stopQuiz()">⛔ 停止測驗</button>
                 </div>
@@ -602,12 +698,19 @@ function renderQuestion() {
     `;
 }
 
+window.submitSpelling = () => {
+    const input = document.getElementById('spelling-input');
+    const val = input.value.trim().toLowerCase();
+    const q = quizState.questions[quizState.index];
+    submitAnswer(input, val, q.correct.toLowerCase());
+};
+
 window.submitAnswer = (btn, selected, correct) => {
     const allBtns = document.querySelectorAll('.option-btn');
     allBtns.forEach(b => b.style.pointerEvents = 'none');
 
     if (selected === correct) {
-        btn.classList.add('correct');
+        if (btn && btn.classList) btn.classList.add('correct');
         quizState.score++;
         // Add to mastered words if correct in non-placement quiz
         if (quizState.type !== 'placement') {
@@ -616,11 +719,12 @@ window.submitAnswer = (btn, selected, correct) => {
         }
         window.speak(quizState.questions[quizState.index].target.word);
     } else {
-        btn.classList.add('wrong');
+        if (btn && btn.classList) btn.classList.add('wrong');
         allBtns.forEach(b => {
             if (b.textContent === correct) b.classList.add('correct');
         });
         quizState.incorrectWords.push(quizState.questions[quizState.index].target);
+        alert(`答錯了！正確答案是：${correct}`);
         window.speak('Wrong');
     }
 
@@ -661,6 +765,12 @@ function finishQuiz() {
                         ${quizState.score} / ${quizState.questions.length}
                     </div>
                     
+                    ${quizState.type === 'daily' && quizState.score >= quizState.questions.length * 0.8 ? `
+                        <div style="background:var(--color-success); color:white; padding:15px; border-radius:12px; margin-bottom:20px;">
+                            🎉 太棒了！你完成了今日測驗！
+                        </div>
+                    ` : ''}
+                    
                     ${hasErrors ? `
                         <div style="margin-bottom:20px; text-align:left; background:#fff5f5; padding:20px; border-radius:12px; border:1px solid #fed7d7;">
                             <h4 style="color:#c53030; margin-bottom:10px;">需要複習的單字：</h4>
@@ -673,8 +783,12 @@ function finishQuiz() {
                         </div>
                     ` : ''}
 
-                    <div style="display:flex; justify-content:center; gap:10px;">
-                        <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
+                    <div style="display:flex; justify-content:center; gap:10px; flex-direction:column;">
+                        ${quizState.type === 'daily' ? `
+                            <button class="btn btn-primary" onclick="markDailyTestDone()">完成學習任務</button>
+                        ` : `
+                            <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
+                        `}
                         <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">回到單字庫</button>
                     </div>
                 </div>
@@ -713,19 +827,43 @@ function renderLearningDashboard(result) {
                 </div>
 
                 <div style="background:#f0f2f5; padding:20px; border-radius:12px; margin-bottom:20px;">
-                     <strong>今日任務：</strong> 複習 3 個單字
-                     <div style="margin-top:10px; font-size:0.9rem; color:#666;">
-                        持續累積，積少成多！
+                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <strong>今日任務：</strong> 
+                        ${dailyTestDone ? '<span style="color:var(--color-success);">✅ 已達成</span>' : `<span style="color:var(--color-text-muted);">${learnedToday.size}/5 單字</span>`}
                      </div>
+                     <div style="margin-bottom:10px; font-size:0.9rem; color:#666;">
+                        ${dailyTestDone ? '做得好！你今天已經完成測驗了。' : '學習並點擊 5 個單字後，即可進行每日測驗。'}
+                     </div>
+                     ${!dailyTestDone && learnedToday.size >= 5 ? `
+                        <button class="btn btn-primary" style="width:100%;" onclick="startDailyTest()">🎯 開始今日測驗</button>
+                     ` : ''}
+                </div>
+
+                <div style="background:white; border:1px solid #eee; padding:20px; border-radius:12px; margin-bottom:20px;">
+                    <h4 style="margin-bottom:12px;">🔔 通知提醒</h4>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                        <span>開啟每日提醒</span>
+                        <label class="switch">
+                            <input type="checkbox" id="notif-toggle" ${notificationManager.config.enabled ? 'checked' : ''} onchange="toggleNotifications(this)">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <span>提醒時間</span>
+                        <input type="time" id="notif-time" value="${notificationManager.config.time}" onchange="updateNotificationTime(this)" style="padding:4px 8px; border-radius:4px; border:1px solid #ddd;">
+                    </div>
                 </div>
                 
                 <h4 style="margin-bottom:16px;">🔥 今日推薦單字 (${result.level})</h4>
                 <div class="word-grid" style="grid-template-columns:1fr;">
                      ${dailyWords.map(w => `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; border:1px solid #eee; border-radius:12px; margin-bottom:10px;">
-                            <div>
-                                <div style="font-weight:bold;">${w.word}</div>
-                                <div style="color:#666; font-size:0.9rem;">${w.definition && w.definition !== '(暫無釋義)' ? w.definition : '點擊查看解釋'}</div>
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                ${learnedToday.has(w.id) ? '<span style="color:var(--color-success);">✅</span>' : '<span style="color:#ccc;">⚪</span>'}
+                                <div>
+                                    <div style="font-weight:bold;">${w.word}</div>
+                                    <div style="color:#666; font-size:0.9rem; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${w.definition && w.definition !== '(暫無釋義)' ? w.definition : '點擊查看解釋'}</div>
+                                </div>
                             </div>
                             <button class="btn btn-primary" onclick="openModal({id:'${w.id}', word:'${w.word}', pos:'${w.pos}', definition:'${w.definition}', sentence:'${w.sentence}', level:${w.level}, frequency:${w.frequency}})">學習</button>
                         </div>
@@ -735,6 +873,55 @@ function renderLearningDashboard(result) {
         </div>
     `;
 }
+
+function markWordAsLearned(id) {
+    if (!learnedToday.has(id)) {
+        learnedToday.add(id);
+        localStorage.setItem('learnedToday', JSON.stringify([...learnedToday]));
+        // Refresh learning view if active
+        const activeLink = document.querySelector('.nav-link.active, .bottom-nav-item.active');
+        if (activeLink && activeLink.dataset.view === 'learning') {
+            const placementResult = JSON.parse(localStorage.getItem('placementTestResult'));
+            if (placementResult) renderLearningDashboard(placementResult);
+        }
+    }
+}
+
+window.toggleNotifications = async (checkbox) => {
+    if (checkbox.checked) {
+        const granted = await notificationManager.requestPermission();
+        if (!granted) {
+            checkbox.checked = false;
+            return;
+        }
+    }
+    const time = document.getElementById('notif-time').value;
+    notificationManager.updateConfig(checkbox.checked, time);
+};
+
+window.updateNotificationTime = (input) => {
+    const enabled = document.getElementById('notif-toggle').checked;
+    notificationManager.updateConfig(enabled, input.value);
+};
+
+function getDailyTestPool() {
+    return vocabularyDatabase.filter(w => learnedToday.has(w.id));
+}
+
+window.startDailyTest = () => {
+    const pool = getDailyTestPool();
+    if (pool.length < 4) {
+        alert('學過的單字不足 4 個，無法進行測驗！再多學幾個吧！');
+        return;
+    }
+    startQuiz('daily', pool);
+};
+
+window.markDailyTestDone = () => {
+    dailyTestDone = true;
+    localStorage.setItem('dailyTestDone', new Date().toDateString());
+    handleNavigation('learning');
+};
 
 function getPersonalizedWords(levelName) {
     let targetLevels = [1, 2]; // Default Beginner
