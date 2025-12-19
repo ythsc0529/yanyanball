@@ -103,6 +103,10 @@ function updateUIForUser(user) {
     if (user.displayName) {
         if (elements.userName) elements.userName.textContent = user.displayName;
         if (elements.userAvatar) elements.userAvatar.textContent = user.displayName[0].toUpperCase();
+
+        // Update Mobile Header User Info
+        const mobileUserInfo = document.getElementById('mobile-user-info');
+        if (mobileUserInfo) mobileUserInfo.textContent = user.displayName;
     }
     if (user.isAnonymous && elements.vipLink) {
         elements.vipLink.style.opacity = '0.5';
@@ -126,14 +130,19 @@ function setupEventListeners() {
         });
     }
 
-    // Navigation
-    document.querySelectorAll('.nav-link').forEach(link => {
+    // Navigation (Desktop Sidebar & Mobile Bottom Nav)
+    document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
             const view = e.currentTarget.dataset.view;
             quizState.active = false; // Reset quiz state when navigating
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            e.currentTarget.classList.add('active');
+
+            // Update active states for all navigation items
+            document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => {
+                if (l.dataset.view === view) l.classList.add('active');
+                else l.classList.remove('active');
+            });
+
             handleNavigation(view);
         });
     });

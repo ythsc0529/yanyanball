@@ -20,6 +20,53 @@
             background: #f8f9fa;
         }
 
+        .mobile-header {
+            display: none;
+            background: white;
+            padding: 12px 20px;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #eee;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .bottom-nav {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            display: none;
+            /* Hide by default, show on mobile */
+            justify-content: space-around;
+            padding: 12px;
+            border-top: 1px solid #eee;
+            z-index: 100;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .bottom-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+            color: var(--color-text-muted);
+            font-size: 0.7rem;
+            flex: 1;
+        }
+
+        .bottom-nav-item.active {
+            color: var(--color-primary);
+        }
+
+        .bottom-nav-item span {
+            font-size: 1.2rem;
+        }
+
         /* Sidebar */
         .sidebar {
             background: white;
@@ -216,17 +263,55 @@
         /* Mobile adjustment */
         @media (max-width: 768px) {
             body {
-                grid-template-columns: 1fr;
+                grid-template-columns: 1fr !important;
+                grid-template-rows: auto 1fr auto !important;
+                overflow: auto;
             }
 
             .sidebar {
-                display: none;
+                display: none !important;
+            }
+
+            .mobile-header {
+                display: flex;
+            }
+
+            .bottom-nav {
+                display: flex;
+            }
+
+            .main-content {
+                padding: 20px;
+                padding-bottom: 80px;
+                /* Space for bottom nav */
+                height: auto;
+                overflow: visible;
+            }
+
+            .header-bar h2 {
+                font-size: 1.5rem;
+            }
+
+            .search-container {
+                flex-direction: column;
+            }
+
+            .word-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
 
 <body>
+    <header class="mobile-header">
+        <div class="brand" style="margin-bottom: 0;">
+            <img src="./yanyan_mascot_logo.png" alt="Logo" style="width: 32px; height: 32px;">
+            雁雁球
+        </div>
+        <div id="mobile-user-info" style="font-size: 0.9rem; font-weight: 500;"></div>
+    </header>
+
     <nav class="sidebar">
         <div class="brand">
             <img src="./yanyan_mascot_logo.png" alt="Logo">
@@ -300,6 +385,26 @@
             </div>
         </div>
     </div>
+
+    <!-- Bottom Nav for Mobile -->
+    <nav class="bottom-nav">
+        <a href="#" class="bottom-nav-item active" data-view="vocabulary">
+            <span>📚</span>
+            單字書
+        </a>
+        <a href="#" class="bottom-nav-item" data-view="quiz">
+            <span>✍️</span>
+            測驗區
+        </a>
+        <a href="#" class="bottom-nav-item" data-view="learning">
+            <span>🚀</span>
+            學習
+        </a>
+        <a href="#" class="bottom-nav-item" data-view="stars">
+            <span>⭐</span>
+            收藏
+        </a>
+    </nav>
 
     <script type="module" src="./src/app.js"></script>
 </body>
