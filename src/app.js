@@ -1,6 +1,8 @@
 import { auth, logout } from './auth';
+import { db } from './firebase';
 import { vocabularyDatabase } from './data';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Countdown } from './utils/countdown.js';
 
 console.log("App.js loaded v4");
@@ -92,11 +94,34 @@ function checkAuth() {
             if (user) {
                 currentUser = user;
                 updateUIForUser(user);
+                startCloudSync(user.uid);
             } else {
                 window.location.href = '/index.html';
             }
         });
     }
+}
+
+let unsubscribeCloudSync = null;
+function startCloudSync(uid) {
+    if (unsubscribeCloudSync) unsubscribeCloudSync();
+
+    const userDocRef = doc(db, 'users', uid);
+    unsubscribeCloudSync = onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.starredWords) {
+                starredWords = new Set(data.starredWords);
+                localStorage.setItem('starredWords', JSON.stringify([...starredWords]));
+
+                // Refresh current view if it's the stars view
+                const activeLink = document.querySelector('.nav-link.active, .bottom-nav-item.active');
+                if (activeLink && activeLink.dataset.view === 'stars') {
+                    handleNavigation('stars');
+                }
+            }
+        }
+    });
 }
 
 function updateUIForUser(user) {
@@ -155,11 +180,21 @@ function setupEventListeners() {
         });
     }
 
-    // User Profile Click
+    // User Profile Click (Desktop)
     const userName = document.getElementById('user-name');
     if (userName) {
         userName.addEventListener('click', () => {
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => l.classList.remove('active'));
+            handleNavigation('profile');
+        });
+    }
+
+    // User Profile Click (Mobile Header)
+    const mobileUserInfo = document.getElementById('mobile-user-info');
+    if (mobileUserInfo) {
+        mobileUserInfo.style.cursor = 'pointer';
+        mobileUserInfo.addEventListener('click', () => {
+            document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => l.classList.remove('active'));
             handleNavigation('profile');
         });
     }
@@ -718,18 +753,27 @@ window.checkPlacementTest = checkPlacementTest;
 window.toggleStar = toggleStar;
 
 function toggleStar(id) {
-
     if (starredWords.has(id)) starredWords.delete(id);
     else starredWords.add(id);
+
+    // Save to LocalStorage immediately for responsiveness
     localStorage.setItem('starredWords', JSON.stringify([...starredWords]));
 
-    const btn = document.querySelector(`.icon-btn.star[data-id="${id}"]`);
-    if (btn) {
-        btn.innerHTML = starredWords.has(id) ? '★' : '☆';
-        btn.classList.toggle('active');
+    // Sync to Cloud if logged in
+    if (currentUser && !currentUser.isAnonymous) {
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        setDoc(userDocRef, { starredWords: [...starredWords] }, { merge: true })
+            .catch(err => console.error("Cloud sync failed:", err));
     }
 
-    const activeLink = document.querySelector('.nav-link.active');
+    // Update UI
+    const btns = document.querySelectorAll(`.icon-btn.star[data-id="${id}"]`);
+    btns.forEach(btn => {
+        btn.innerHTML = starredWords.has(id) ? '★' : '☆';
+        btn.classList.toggle('active', starredWords.has(id));
+    });
+
+    const activeLink = document.querySelector('.nav-link.active, .bottom-nav-item.active');
     if (activeLink && activeLink.dataset.view === 'stars') {
         const starry = vocabularyDatabase.filter(w => starredWords.has(w.id));
         displayedWords = starry;
