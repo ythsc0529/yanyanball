@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>雁雁球 | 學測英文神器</title>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Outfit:wght@400;600;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    /* Landing Page Specific Styles */
+    body {
+      justify-content: center;
+      align-items: center;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 40px;
+      max-width: 600px;
+      width: 90%;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    .logo-area {
+      margin-bottom: 2rem;
+      animation: float 6s ease-in-out infinite;
+    }
+
+    .title {
+      font-size: 3rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(45deg, var(--color-primary), var(--color-accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: var(--color-text-muted);
+      font-size: 1.1rem;
+      margin-bottom: 2rem;
+    }
+
+    .countdown-container {
+      margin: 2rem 0;
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .countdown-title {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--color-text-muted);
+      margin-bottom: 1rem;
+    }
+
+    #countdown {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .time-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .number {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--color-primary);
+      line-height: 1;
+    }
+
+    .label {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+    }
+
+    .separator {
+      font-size: 2rem;
+      color: var(--color-primary);
+      margin-top: -15px;
+    }
+
+    .auth-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 3rem;
+    }
+
+    .google-btn {
+      background: white;
+      color: #333;
+      justify-content: center;
+      font-weight: 500;
+      border: 1px solid #ddd;
+    }
+
+    .google-btn img {
+      width: 20px;
+      height: 20px;
+    }
+
+    .guest-btn {
+      background: transparent;
+      color: var(--color-text-muted);
+      justify-content: center;
+      font-size: 0.9rem;
+    }
+
+    .guest-btn:hover {
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+
+    .copyright {
+      margin-top: 4rem;
+      font-size: 0.8rem;
+      color: rgba(0, 0, 0, 0.3);
+    }
+
+    /* Update Log Modal Styles */
+    .log-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+    }
+
+    .log-overlay.open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .log-content {
+      background: white;
+      width: 90%;
+      max-width: 500px;
+      border-radius: 28px;
+      padding: 40px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+      transform: scale(0.9) translateY(20px);
+      transition: all 0.5s cubic-bezier(0.165, 0.84, 0.44, 1);
+      position: relative;
+    }
+
+    .log-overlay.open .log-content {
+      transform: scale(1) translateY(0);
+    }
+
+    .log-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .log-badge {
+      display: inline-block;
+      background: var(--color-primary);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .log-list {
+      text-align: left;
+      list-style: none;
+      margin-bottom: 32px;
+    }
+
+    .log-item {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      font-size: 1rem;
+      line-height: 1.5;
+      color: var(--color-text-main);
+    }
+
+    .log-item b {
+      color: var(--color-primary);
+      min-width: 70px;
+    }
+
+    .log-btn {
+      width: 100%;
+      justify-content: center;
+      background: var(--color-primary);
+      color: white;
+      padding: 16px;
+      border-radius: 16px;
+      font-weight: 700;
+      font-size: 1.1rem;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 10px 20px rgba(67, 97, 238, 0.3);
+      transition: all 0.3s;
+    }
+
+    .log-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 15px 30px rgba(67, 97, 238, 0.4);
+      background: var(--color-primary-dark);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="glass-panel hero">
+    <div class="logo-area">
+      <!-- YanYan Mascot Logo -->
+      <img src="./yanyan_mascot_logo.png" alt="YanYanBall Logo"
+        style="width: 150px; height: 150px; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-lg);">
+    </div>
+
+    <h1 class="title">雁雁球</h1>
+    <p class="subtitle">115 學測英文 • 7000 單字 • Designed by 黃士禎</p>
+
+    <div class="countdown-container">
+      <div class="countdown-title">距離 115 學測還有</div>
+      <div id="countdown"></div>
+    </div>
+
+    <div class="auth-buttons">
+      <button id="google-login" class="btn google-btn">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+        使用 Google 登入
+      </button>
+      <button id="guest-login" class="btn guest-btn">
+        先當訪客看看
+      </button>
+    </div>
+
+    <div class="copyright">
+      Designed by 黃士禎
+    </div>
+  </div>
+
+  <!-- Update Log Modal -->
+  <div class="log-overlay" id="update-log-modal">
+    <div class="log-content">
+      <div class="log-header">
+        <span class="log-badge">NEW UPDATE</span>
+        <h2 style="font-size: 1.8rem; font-weight: 800; color: #1a202c;">雁雁球更新日誌</h2>
+      </div>
+
+      <ul class="log-list">
+        <li class="log-item"><b>UI 優化</b> <span>改用純色背景、電腦版支援 4 欄顯示。</span></li>
+        <li class="log-item"><b>測驗升級</b> <span>答對直接朗讀單字、新增「不知道」選項。</span></li>
+        <li class="log-item"><b>學習強化</b> <span>錯題一鍵收藏功能、支援錯題自動重測。</span></li>
+        <li class="log-item"><b>閱讀體驗</b> <span>優化測驗介面，完美處理長單字與解釋。</span></li>
+        <li class="log-item"><b>許願時間</b> <span>希望朱雁玲不會當我。</span></li>
+        <li class="log-item"><b>炫耀時間</b> <span>寫這網站寫十年，喜歡的話可以直接帶著1000塊現鈔給我。</span></li>
+      </ul>
+
+      <button class="log-btn" id="close-log-btn">✨ 開始學習！</button>
+    </div>
+  </div>
+
+  <script>
+    // Show Modal logic
+    window.addEventListener('DOMContentLoaded', () => {
+      const modal = document.getElementById('update-log-modal');
+      const closeBtn = document.getElementById('close-log-btn');
+
+      // Always show on page load as requested
+      setTimeout(() => {
+        modal.classList.add('open');
+      }, 500);
+
+      closeBtn.addEventListener('click', () => {
+        modal.classList.remove('open');
+      });
+
+      // Close on clicking overlay
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.remove('open');
+      });
+    });
+  </script>
+
+  <script type="module" src="/main.js"></script>
+</body>
+
+</html>
