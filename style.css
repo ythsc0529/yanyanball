@@ -211,15 +211,19 @@ body {
 }
 
 .option-btn.correct {
-  background: var(--color-success);
+  background: #208b81;
+  /* Darker teal */
   color: white;
-  border-color: var(--color-success);
+  border-color: #208b81;
+  font-weight: bold;
 }
 
 .option-btn.wrong {
-  background: #ef233c;
+  background: #d90429;
+  /* Darker red */
   color: white;
-  border-color: #ef233c;
+  border-color: #d90429;
+  font-weight: bold;
 }
 
 /* Pagination */

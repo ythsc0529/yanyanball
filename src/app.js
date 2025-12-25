@@ -4,7 +4,6 @@ import { vocabularyDatabase } from './data';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Countdown } from './utils/countdown.js';
-import { NotificationManager } from './notifications.js';
 
 console.log("App.js loaded v4");
 
@@ -17,11 +16,6 @@ let masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || 
 const EXAM_DATE = '2026-01-17T09:00:00';
 const ITEMS_PER_PAGE = 20;
 let currentPage = 1;
-const notificationManager = new NotificationManager();
-
-// Learning Progress State
-let learnedToday = new Set(JSON.parse(localStorage.getItem('learnedToday') || '[]'));
-let dailyTestDone = localStorage.getItem('dailyTestDone') === new Date().toDateString();
 
 // Definition Cache
 const cachedDefinitions = JSON.parse(localStorage.getItem('cachedDefinitions') || '{}');
@@ -79,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
         const countdown = new Countdown(EXAM_DATE, 'sidebar-countdown');
         countdown.start();
+        const mobileCountdown = new Countdown(EXAM_DATE, 'mobile-countdown');
+        mobileCountdown.start();
     } catch (e) { console.error("Countdown init error", e); }
 
     checkAuth();
@@ -90,6 +86,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupEventListeners();
     updateStreak();
+
+    // Notification Check Loop (Every minute)
+    setInterval(() => {
+        const enabled = localStorage.getItem('notifyEnabled') === 'true';
+        if (!enabled) return;
+
+        const time = localStorage.getItem('notifyTime') || '20:00';
+        const now = new Date();
+        const currentHM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const lastDate = localStorage.getItem('lastNotificationDate');
+        const todayStr = now.toDateString();
+
+        if (currentHM === time && lastDate !== todayStr) {
+            new Notification("雁雁球學習提醒", {
+                body: "該學習囉！今天還沒背單字嗎？",
+                icon: '/yanyan_mascot_logo.png'
+            });
+            localStorage.setItem('lastNotificationDate', todayStr);
+        }
+    }, 60000); // Check every 60s
 });
 
 function checkAuth() {
@@ -141,21 +157,11 @@ function updateUIForUser(user) {
         const mobileUserInfo = document.getElementById('mobile-user-info');
         if (mobileUserInfo) mobileUserInfo.textContent = user.displayName;
     }
-    if (user.isAnonymous) {
-        // Handle Sidebar VIP Link
-        if (elements.vipLink) {
-            elements.vipLink.style.opacity = '0.5';
-            elements.vipLink.querySelector('span').nextSibling.textContent = ' 雁雁球學習 (限會員)';
-            elements.vipLink.style.pointerEvents = 'none';
-            elements.vipLink.title = "請登入以使用此功能";
-        }
-        // Handle Mobile Bottom Nav VIP Link
-        const mobileVipLink = document.querySelector('.bottom-nav-item[data-view="learning"]');
-        if (mobileVipLink) {
-            mobileVipLink.style.opacity = '0.5';
-            mobileVipLink.style.pointerEvents = 'none';
-            mobileVipLink.title = "請登入以使用此功能";
-        }
+    if (user.isAnonymous && elements.vipLink) {
+        elements.vipLink.style.opacity = '0.5';
+        elements.vipLink.querySelector('span').nextSibling.textContent = ' 雁雁球學習 (限會員)';
+        elements.vipLink.style.pointerEvents = 'none';
+        elements.vipLink.title = "請登入以使用此功能";
     }
 }
 
@@ -163,6 +169,18 @@ function setupEventListeners() {
     // Search & Sort interaction
     if (elements.searchInput) elements.searchInput.addEventListener('input', updateList);
     if (elements.sortSelect) elements.sortSelect.addEventListener('change', updateList);
+    const levelFilter = document.getElementById('level-filter');
+    if (levelFilter) levelFilter.addEventListener('change', updateList);
+
+    const sortOrderBtn = document.getElementById('sort-order-btn');
+    let isAscending = true;
+    if (sortOrderBtn) {
+        sortOrderBtn.addEventListener('click', () => {
+            isAscending = !isAscending;
+            sortOrderBtn.textContent = isAscending ? '⬇️' : '⬆️';
+            updateList();
+        });
+    }
 
     // Logout
     const logoutAction = async () => {
@@ -223,6 +241,134 @@ function setupEventListeners() {
 
 function updateList() {
     if (!elements.searchInput || !elements.sortSelect) return;
+    const query = elements.searchInput.value.toLowerCase().trim();
+    const sort = elements.sortSelect.value;
+    const levelStr = document.getElementById('level-filter')?.value || 'all';
+    const isAscending = document.getElementById('sort-order-btn')?.textContent.includes('⬇️') ?? true;
+
+    // Helper for fuzzy search - handling simple variations
+    const normalize = (w) => {
+        if (w.length <= 3) return w;
+        if (w.endsWith('s')) return w.slice(0, -1);
+        if (w.endsWith('ed')) return w.slice(0, -2);
+        if (w.endsWith('ing')) return w.slice(0, -3);
+        return w;
+    };
+    const normQuery = normalize(query);
+
+    let filtered = vocabularyDatabase.filter(item => {
+        // Level Filter
+        if (levelStr !== 'all' && item.level !== parseInt(levelStr)) return false;
+
+        // Search Filter
+        if (!query) return true;
+
+        const wordLower = item.word.toLowerCase();
+        const def = (item.definition || '').toLowerCase();
+
+        // Exact match has highest priority (handled by sorting implicitly if strict match)
+        // Check standard includes
+        if (wordLower.includes(query) || def.includes(query)) return true;
+
+        // Check variations
+        const normWord = normalize(wordLower);
+        if (normWord.includes(normQuery)) return true; // e.g. "play" matches "playing" (norm: "play")
+
+        return false;
+    });
+
+    // Sorting
+    filtered.sort((a, b) => {
+        let valA, valB;
+        if (sort === 'alpha') {
+            valA = a.word.toLowerCase();
+            valB = b.word.toLowerCase();
+            return isAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else if (sort === 'frequency') {
+            valA = a.frequency || 0;
+            valB = b.frequency || 0;
+            // Frequency: usually high freq #1 is better? Let's assume user wants high freq first usually.
+            // If Ascending (Arrow Down implies top-down 1..N): 1 is bigger? 
+            // Usually "Frequency" sort means Most Frequent First.
+            // Let's standard: 
+            // Ascending (⬇️): High to Low? Or A->Z?
+            // "Ascending" usually means 0->9, A->Z.
+            // "Descending" usually means 9->0, Z->A.
+            // For Frequency: "High Frequency" usually means smaller rank number if 1 is best, or larger count.
+            // Assuming data has 'frequency' as a rank (1 = most common).
+            // So Ascending (1->100) = Most frequent first.
+            return isAscending ? (valA - valB) : (valB - valA);
+        } else if (sort === 'level') {
+            valA = a.level || 0;
+            valB = b.level || 0;
+            return isAscending ? (valA - valB) : (valB - valA);
+        }
+    });
+
+    displayedWords = filtered;
+    currentPage = 1;
+    renderPaginationList();
+}
+
+// Logout
+const logoutAction = async () => {
+    if (currentUser?.isAnonymous) localStorage.removeItem('guestMode');
+    else await logout();
+    window.location.href = '/index.html';
+};
+
+if (elements.logoutBtn) elements.logoutBtn.addEventListener('click', logoutAction);
+
+const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+if (mobileLogoutBtn) mobileLogoutBtn.addEventListener('click', logoutAction);
+
+// Navigation (Desktop Sidebar & Mobile Bottom Nav)
+document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(link => {
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const view = e.currentTarget.dataset.view;
+        quizState.active = false; // Reset quiz state when navigating
+
+        // Update active states for all navigation items
+        document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => {
+            if (l.dataset.view === view) l.classList.add('active');
+            else l.classList.remove('active');
+        });
+
+        handleNavigation(view);
+    });
+});
+
+// Modal Close
+if (elements.closeModal) elements.closeModal.addEventListener('click', closeModal);
+if (elements.modal) {
+    elements.modal.addEventListener('click', (e) => {
+        if (e.target === elements.modal) closeModal();
+    });
+}
+
+// User Profile Click (Desktop)
+const userName = document.getElementById('user-name');
+if (userName) {
+    userName.addEventListener('click', () => {
+        document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => l.classList.remove('active'));
+        handleNavigation('profile');
+    });
+}
+
+// User Profile Click (Mobile Header)
+const mobileUserInfo = document.getElementById('mobile-user-info');
+if (mobileUserInfo) {
+    mobileUserInfo.style.cursor = 'pointer';
+    mobileUserInfo.addEventListener('click', () => {
+        document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => l.classList.remove('active'));
+        handleNavigation('profile');
+    });
+}
+}
+
+function updateList() {
+    if (!elements.searchInput || !elements.sortSelect) return;
     const query = elements.searchInput.value.toLowerCase();
     const sort = elements.sortSelect.value;
 
@@ -242,18 +388,6 @@ function updateList() {
 
 function handleNavigation(view) {
     const title = document.querySelector('h2');
-    // Guest Access Security
-    if (view === 'learning' && currentUser?.isAnonymous) {
-        alert('請先登入以使用雁雁球學習功能！');
-        handleNavigation('vocabulary');
-        // Update active states
-        document.querySelectorAll('.nav-link, .bottom-nav-item').forEach(l => {
-            if (l.dataset.view === 'vocabulary') l.classList.add('active');
-            else l.classList.remove('active');
-        });
-        return;
-    }
-
     elements.wordList.innerHTML = '';
     elements.wordList.className = ''; // Reset classes
 
@@ -411,7 +545,14 @@ function openModal(item) {
         });
     }
 
-    markWordAsLearned(item.id);
+    // TRACK LEARNING (Daily Log)
+    const today = new Date().toISOString().split('T')[0];
+    const dailyLog = JSON.parse(localStorage.getItem('dailyLearningLog') || '{}');
+    if (!dailyLog[today]) dailyLog[today] = [];
+    if (!dailyLog[today].includes(item.id)) {
+        dailyLog[today].push(item.id);
+        localStorage.setItem('dailyLearningLog', JSON.stringify(dailyLog));
+    }
 
     elements.modalBody.innerHTML = `
         <div style="text-align:center; margin-bottom:20px;">
@@ -495,6 +636,10 @@ function renderQuizOptions() {
 }
 
 window.startQuizMode = (mode) => {
+    if (currentUser && currentUser.isAnonymous) {
+        alert("請登入以使用此功能！");
+        return;
+    }
     let pool = [];
 
     if (mode === 'all') {
@@ -534,6 +679,17 @@ window.starIncorrectWords = () => {
 };
 
 function checkPlacementTest() {
+    if (currentUser && currentUser.isAnonymous) {
+        elements.wordList.innerHTML = `
+            <div class="quiz-container">
+                <div class="quiz-card">
+                    <h3>訪客無法使用學習功能</h3>
+                    <p style="color:#666; margin:20px 0;">請登入以建立您的專屬學習計畫。</p>
+                </div>
+            </div>
+        `;
+        return;
+    }
     const hasTaken = localStorage.getItem('placementTestResult');
     if (!hasTaken) {
         renderPlacementIntro();
@@ -591,26 +747,9 @@ window.startQuiz = (type, customPool = null) => {
     quizState.questions = selected.map(target => {
         const others = vocabularyDatabase.filter(w => w.id !== target.id);
         others.sort(() => Math.random() - 0.5);
-
-        // Randomly pick a question type
-        const types = ['TRANS_EN_ZH', 'TRANS_ZH_EN', 'LISTENING', 'SPELLING'];
-        const qType = types[Math.floor(Math.random() * types.length)];
-
         const options = [target.definition, others[0]?.definition, others[1]?.definition, others[2]?.definition];
-        if (qType === 'TRANS_ZH_EN' || qType === 'LISTENING') {
-            options[0] = target.word;
-            options[1] = others[0]?.word;
-            options[2] = others[1]?.word;
-            options[3] = others[2]?.word;
-        }
         options.sort(() => Math.random() - 0.5);
-
-        return {
-            target,
-            options,
-            correct: (qType === 'TRANS_ZH_EN' || qType === 'LISTENING') ? target.word : target.definition,
-            qType
-        };
+        return { target, options, correct: target.definition };
     });
 
     renderQuestion();
@@ -625,71 +764,22 @@ function renderQuestion() {
 
     const q = quizState.questions[quizState.index];
     const total = quizState.questions.length;
-    let title = '測驗區';
-    if (quizState.type === 'placement') title = '分級測試';
-    if (quizState.type === 'daily') title = '今日測驗';
-
-    let questionHtml = '';
-    if (q.qType === 'TRANS_EN_ZH') {
-        questionHtml = `
-            <h4 style="color:#666; margin-bottom:10px;">請選擇正確的中文意思：</h4>
-            <h2 style="font-size:clamp(1.5rem, 8vw, 2.5rem); margin-bottom:30px;">${q.target.word}</h2>
-            <div class="quiz-options">
-                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
-            </div>
-        `;
-    } else if (q.qType === 'TRANS_ZH_EN') {
-        questionHtml = `
-            <h4 style="color:#666; margin-bottom:10px;">請選擇正確的英文單字：</h4>
-            <h2 style="font-size:clamp(1.2rem, 6vw, 2rem); margin-bottom:30px;">${q.target.definition}</h2>
-            <div class="quiz-options">
-                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
-            </div>
-        `;
-    } else if (q.qType === 'LISTENING') {
-        questionHtml = `
-            <h4 style="color:#666; margin-bottom:10px;">聽音辨義：</h4>
-            <div style="margin-bottom:30px;">
-                <button class="btn btn-primary" style="font-size:2rem; padding:20px 30px; border-radius:50%;" onclick="window.speak('${q.target.word}')">🔊</button>
-            </div>
-            <div class="quiz-options">
-                ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
-            </div>
-        `;
-        // Auto play audio
-        setTimeout(() => window.speak(q.target.word), 500);
-    } else if (q.qType === 'SPELLING') {
-        questionHtml = `
-            <h4 style="color:#666; margin-bottom:10px;">請拼寫出該單字：</h4>
-            <h2 style="font-size:clamp(1.2rem, 6vw, 2rem); margin-bottom:10px;">${q.target.definition}</h2>
-            <p style="color:#999; margin-bottom:20px;">提示：${q.target.word[0]}${'.'.repeat(q.target.word.length - 1)} (${q.target.word.length} 個字母)</p>
-            <div style="margin-bottom:20px;">
-                <input type="text" id="spelling-input" class="search-input" style="font-size:1.5rem; text-align:center; letter-spacing:2px;" autocomplete="off" autofocus>
-            </div>
-            <button class="btn btn-primary" style="width:100%;" onclick="submitSpelling()">提交答案</button>
-        `;
-        // Auto focus
-        setTimeout(() => {
-            const input = document.getElementById('spelling-input');
-            if (input) {
-                input.focus();
-                input.onkeyup = (e) => { if (e.key === 'Enter') submitSpelling(); };
-            }
-        }, 300);
-    }
+    const title = quizState.type === 'placement' ? '分級測試' : '隨機測驗';
 
     elements.wordList.innerHTML = `
         <div class="quiz-container">
             <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
                 <span style="font-weight:bold;">${title}</span>
-                <div style="flex:1; height:8px; background:#eee; margin:0 20px; border-radius:4px; overflow:hidden;">
-                    <div style="width:${((quizState.index + 1) / total) * 100}%; height:100%; background:var(--color-primary); transition:width 0.3s;"></div>
-                </div>
                 <span style="color:#999;">${quizState.index + 1} / ${total}</span>
             </div>
             
             <div class="quiz-card">
-                ${questionHtml}
+                <h2 style="font-size:clamp(1.5rem, 8vw, 2.5rem); margin-bottom:30px; word-wrap: break-word; overflow-wrap: break-word; line-height: 1.2;">${q.target.word}</h2>
+                <div class="quiz-options">
+                    ${q.options.map(opt => `<button class="option-btn" onclick="submitAnswer(this, '${opt}', '${q.correct}')">${opt}</button>`).join('')}
+                    <button class="option-btn not-sure" onclick="submitAnswer(this, 'DONT_KNOW', '${q.correct}')">不知道 (I don't know)</button>
+                </div>
+                
                 <div style="margin-top:30px; border-top:1px solid #eee; padding-top:20px;">
                     <button class="btn btn-secondary" onclick="stopQuiz()">⛔ 停止測驗</button>
                 </div>
@@ -698,34 +788,50 @@ function renderQuestion() {
     `;
 }
 
-window.submitSpelling = () => {
-    const input = document.getElementById('spelling-input');
-    const val = input.value.trim().toLowerCase();
-    const q = quizState.questions[quizState.index];
-    submitAnswer(input, val, q.correct.toLowerCase());
-};
-
 window.submitAnswer = (btn, selected, correct) => {
     const allBtns = document.querySelectorAll('.option-btn');
     allBtns.forEach(b => b.style.pointerEvents = 'none');
 
+    const currentQ = quizState.questions[quizState.index];
+
     if (selected === correct) {
-        if (btn && btn.classList) btn.classList.add('correct');
+        btn.classList.add('correct');
         quizState.score++;
+
+        // Unstar if in Starred mode
+        if (quizState.type === 'starred') {
+            if (confirm(`恭喜答對！要將 "${currentQ.target.word}" 移出星號清單嗎？`)) {
+                toggleStar(currentQ.target.id);
+            }
+        }
+
         // Add to mastered words if correct in non-placement quiz
         if (quizState.type !== 'placement') {
-            masteredWords.add(quizState.questions[quizState.index].target.id);
+            masteredWords.add(currentQ.target.id);
             localStorage.setItem('masteredWords', JSON.stringify([...masteredWords]));
         }
-        window.speak(quizState.questions[quizState.index].target.word);
+        window.speak(currentQ.target.word);
     } else {
-        if (btn && btn.classList) btn.classList.add('wrong');
+        btn.classList.add('wrong');
         allBtns.forEach(b => {
             if (b.textContent === correct) b.classList.add('correct');
         });
-        quizState.incorrectWords.push(quizState.questions[quizState.index].target);
-        alert(`答錯了！正確答案是：${correct}`);
+
+        // Track incorrect word (avoid duplicates)
+        if (!quizState.incorrectWords.some(w => w.id === currentQ.target.id)) {
+            quizState.incorrectWords.push(currentQ.target);
+        }
+
         window.speak('Wrong');
+
+        // Re-insert question later (Immediate Retry Logic)
+        // Insert at index + 3 or end of array
+        if (quizState.type !== 'placement') {
+            const reInsertIndex = Math.min(quizState.index + 3, quizState.questions.length);
+            // Deep copy to avoid reference issues if mutable (though here objects are ref, which is fine)
+            // We want to re-ask the exact same question structure
+            quizState.questions.splice(reInsertIndex, 0, currentQ);
+        }
     }
 
     setTimeout(() => {
@@ -765,12 +871,6 @@ function finishQuiz() {
                         ${quizState.score} / ${quizState.questions.length}
                     </div>
                     
-                    ${quizState.type === 'daily' && quizState.score >= quizState.questions.length * 0.8 ? `
-                        <div style="background:var(--color-success); color:white; padding:15px; border-radius:12px; margin-bottom:20px;">
-                            🎉 太棒了！你完成了今日測驗！
-                        </div>
-                    ` : ''}
-                    
                     ${hasErrors ? `
                         <div style="margin-bottom:20px; text-align:left; background:#fff5f5; padding:20px; border-radius:12px; border:1px solid #fed7d7;">
                             <h4 style="color:#c53030; margin-bottom:10px;">需要複習的單字：</h4>
@@ -783,12 +883,8 @@ function finishQuiz() {
                         </div>
                     ` : ''}
 
-                    <div style="display:flex; justify-content:center; gap:10px; flex-direction:column;">
-                        ${quizState.type === 'daily' ? `
-                            <button class="btn btn-primary" onclick="markDailyTestDone()">完成學習任務</button>
-                        ` : `
-                            <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
-                        `}
+                    <div style="display:flex; justify-content:center; gap:10px;">
+                        <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
                         <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">回到單字庫</button>
                     </div>
                 </div>
@@ -798,130 +894,73 @@ function finishQuiz() {
 }
 
 function renderLearningDashboard(result) {
-    const dailyWords = getPersonalizedWords(result.level);
-    const streakData = JSON.parse(localStorage.getItem('streakData') || '{"count":0, "lastDate":"", "max":0}');
-    const estimatedVocabulary = calculateVocabularyLevel();
+    const today = new Date().toISOString().split('T')[0];
+    const dailyLog = JSON.parse(localStorage.getItem('dailyLearningLog') || '{}');
+    const todayLearnedCount = (dailyLog[today] || []).length;
+
+    // Check if daily review is done
+    const dailyReviewDone = localStorage.getItem(`dailyReviewDone_${today}`);
 
     elements.wordList.innerHTML = `
         <div class="quiz-container">
-             <div class="quiz-card" style="text-align:left;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <h3 style="margin:0;">📊 學習中心</h3>
-                    <div style="font-size:1.5rem;">🔥 <span style="font-weight:bold; color:var(--color-primary);">${streakData.count}</span> 天連續</div>
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <span class="pos-tag" style="font-size:1rem; background:var(--color-primary); color:white;">等級：${result.level}</span>
-                    <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 8px;" onclick="localStorage.removeItem('placementTestResult'); checkPlacementTest();">重新分級</button>
+             <div class="quiz-card" style="text-align:left; background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);">
+                <div style="text-align:center; margin-bottom:30px;">
+                    <h3 style="margin-bottom:10px; font-size:1.8rem;">我的學習路徑</h3>
+                    <div style="color:#666;">當前等級: <span class="pos-tag" style="background:var(--color-primary); color:white;">${result.level}</span></div>
                 </div>
 
-                <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 20px; gap: 10px;">
-                    <div class="stat-card" style="padding: 10px;">
-                        <div style="font-size: 0.8rem; color: #666;">預估單字量</div>
-                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--color-primary);">${estimatedVocabulary}</div>
-                    </div>
-                    <div class="stat-card" style="padding: 10px;">
-                        <div style="font-size: 0.8rem; color: #666;">精通單字</div>
-                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--color-success);">${masteredWords.size}</div>
+                <!-- Daily Progress Circle -->
+                <div style="display:flex; justify-content:center; margin-bottom:40px;">
+                    <div style="position:relative; width:150px; height:150px; border-radius:50%; border:8px solid #eee; display:flex; align-items:center; justify-content:center; flex-direction:column;">
+                        <svg style="position:absolute; top:-8px; left:-8px; width:150px; height:150px; transform:rotate(-90deg);">
+                            <circle cx="75" cy="75" r="70" fill="none" stroke="var(--color-primary)" stroke-width="8" 
+                                stroke-dasharray="440" stroke-dashoffset="${440 - (todayLearnedCount / 10 * 440)}" stroke-linecap="round" />
+                        </svg>
+                        <div style="font-size:2.5rem; font-weight:bold; color:var(--color-primary);">${todayLearnedCount}</div>
+                        <div style="font-size:0.8rem; color:#999;">今日單字</div>
                     </div>
                 </div>
 
-                <div style="background:#f0f2f5; padding:20px; border-radius:12px; margin-bottom:20px;">
-                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <strong>今日任務：</strong> 
-                        ${dailyTestDone ? '<span style="color:var(--color-success);">✅ 已達成</span>' : `<span style="color:var(--color-text-muted);">${learnedToday.size}/5 單字</span>`}
-                     </div>
-                     <div style="margin-bottom:10px; font-size:0.9rem; color:#666;">
-                        ${dailyTestDone ? '做得好！你今天已經完成測驗了。' : '學習並點擊 5 個單字後，即可進行每日測驗。'}
-                     </div>
-                     ${!dailyTestDone && learnedToday.size >= 5 ? `
-                        <button class="btn btn-primary" style="width:100%;" onclick="startDailyTest()">🎯 開始今日測驗</button>
-                     ` : ''}
-                </div>
-
-                <div style="background:white; border:1px solid #eee; padding:20px; border-radius:12px; margin-bottom:20px;">
-                    <h4 style="margin-bottom:12px;">🔔 通知提醒</h4>
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-                        <span>開啟每日提醒</span>
-                        <label class="switch">
-                            <input type="checkbox" id="notif-toggle" ${notificationManager.config.enabled ? 'checked' : ''} onchange="toggleNotifications(this)">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                    <div style="display:flex; align-items:center; justify-content:space-between;">
-                        <span>提醒時間</span>
-                        <input type="time" id="notif-time" value="${notificationManager.config.time}" onchange="updateNotificationTime(this)" style="padding:4px 8px; border-radius:4px; border:1px solid #ddd;">
-                    </div>
-                </div>
-                
-                <h4 style="margin-bottom:16px;">🔥 今日推薦單字 (${result.level})</h4>
-                <div class="word-grid" style="grid-template-columns:1fr;">
-                     ${dailyWords.map(w => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; border:1px solid #eee; border-radius:12px; margin-bottom:10px;">
-                            <div style="display:flex; align-items:center; gap:12px;">
-                                ${learnedToday.has(w.id) ? '<span style="color:var(--color-success);">✅</span>' : '<span style="color:#ccc;">⚪</span>'}
-                                <div>
-                                    <div style="font-weight:bold;">${w.word}</div>
-                                    <div style="color:#666; font-size:0.9rem; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${w.definition && w.definition !== '(暫無釋義)' ? w.definition : '點擊查看解釋'}</div>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary" onclick="openModal({id:'${w.id}', word:'${w.word}', pos:'${w.pos}', definition:'${w.definition}', sentence:'${w.sentence}', level:${w.level}, frequency:${w.frequency}})">學習</button>
+                <!-- Action Buttons -->
+                <div style="display:grid; gap:16px; margin-bottom:30px;">
+                     <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <h4 style="margin-bottom:4px;">今日單字測驗</h4>
+                            <p style="font-size:0.9rem; color:#666; margin:0;">複習今天看過的所有單字</p>
                         </div>
-                     `).join('')}
+                        <button class="btn ${todayLearnedCount < 4 ? 'btn-secondary' : 'btn-primary'}" 
+                            onclick="startQuizMode('daily')" 
+                            ${todayLearnedCount < 4 ? 'disabled title="至少需學習4個單字"' : ''}>
+                            ${dailyReviewDone ? '✅ 已完成' : '📝 開始測驗'}
+                        </button>
+                     </div>
+
+                     <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <h4 style="margin-bottom:4px;">繼續學習</h4>
+                            <p style="font-size:0.9rem; color:#666; margin:0;">探索更多 ${result.level} 單字</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">🚀 前往單字庫</button>
+                     </div>
+                </div>
+
+                <!-- Stats -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="background:white; padding:15px; border-radius:12px; text-align:center;">
+                        <div style="font-size:2rem;">🔥</div>
+                        <div style="font-weight:bold; font-size:1.2rem;">${localStorage.getItem('streak') || 0} 天</div>
+                        <div style="font-size:0.8rem; color:#999;">連續打卡</div>
+                    </div>
+                    <div style="background:white; padding:15px; border-radius:12px; text-align:center;">
+                        <div style="font-size:2rem;">🏆</div>
+                        <div style="font-weight:bold; font-size:1.2rem;">${masteredWords.size}</div>
+                        <div style="font-size:0.8rem; color:#999;">已精通單字</div>
+                    </div>
                 </div>
             </div>
         </div>
     `;
 }
-
-function markWordAsLearned(id) {
-    if (!learnedToday.has(id)) {
-        learnedToday.add(id);
-        localStorage.setItem('learnedToday', JSON.stringify([...learnedToday]));
-        // Refresh learning view if active
-        const activeLink = document.querySelector('.nav-link.active, .bottom-nav-item.active');
-        if (activeLink && activeLink.dataset.view === 'learning') {
-            const placementResult = JSON.parse(localStorage.getItem('placementTestResult'));
-            if (placementResult) renderLearningDashboard(placementResult);
-        }
-    }
-}
-
-window.toggleNotifications = async (checkbox) => {
-    if (checkbox.checked) {
-        const granted = await notificationManager.requestPermission();
-        if (!granted) {
-            checkbox.checked = false;
-            return;
-        }
-    }
-    const time = document.getElementById('notif-time').value;
-    notificationManager.updateConfig(checkbox.checked, time);
-};
-
-window.updateNotificationTime = (input) => {
-    const enabled = document.getElementById('notif-toggle').checked;
-    notificationManager.updateConfig(enabled, input.value);
-};
-
-function getDailyTestPool() {
-    return vocabularyDatabase.filter(w => learnedToday.has(w.id));
-}
-
-window.startDailyTest = () => {
-    const pool = getDailyTestPool();
-    if (pool.length < 4) {
-        alert('學過的單字不足 4 個，無法進行測驗！再多學幾個吧！');
-        return;
-    }
-    startQuiz('daily', pool);
-};
-
-window.markDailyTestDone = () => {
-    dailyTestDone = true;
-    localStorage.setItem('dailyTestDone', new Date().toDateString());
-    handleNavigation('learning');
-};
 
 function getPersonalizedWords(levelName) {
     let targetLevels = [1, 2]; // Default Beginner
@@ -1090,8 +1129,57 @@ function renderProfile() {
                     <h3>學習建議</h3>
                     <p>${getLearningAdvice()}</p>
                 </div>
+
+                <div class="info-card" style="margin-top: 16px;">
+                    <h3>每日提醒設定</h3>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px;">
+                        <span style="color:#666;">開啟通知:</span>
+                        <label class="switch">
+                            <input type="checkbox" id="notify-toggle" ${localStorage.getItem('notifyEnabled') === 'true' ? 'checked' : ''}>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div id="notify-time-container" style="display:${localStorage.getItem('notifyEnabled') === 'true' ? 'flex' : 'none'}; align-items:center; justify-content:space-between; margin-top:10px;">
+                        <span style="color:#666;">提醒時間:</span>
+                        <input type="time" id="notify-time" value="${localStorage.getItem('notifyTime') || '20:00'}" style="padding:4px; border:1px solid #ddd; border-radius:4px;">
+                    </div>
+                    <div style="font-size:0.8rem; color:#999; margin-top:8px;">* 需保持網頁開啟才能收到通知</div>
+                </div>
             </div>
         `;
+
+        // Bind Notification Events
+        setTimeout(() => {
+            const toggle = document.getElementById('notify-toggle');
+            const timeInput = document.getElementById('notify-time');
+            const timeContainer = document.getElementById('notify-time-container');
+
+            if (toggle) {
+                toggle.addEventListener('change', async (e) => {
+                    const enabled = e.target.checked;
+                    if (enabled) {
+                        const permission = await Notification.requestPermission();
+                        if (permission === 'granted') {
+                            localStorage.setItem('notifyEnabled', 'true');
+                            timeContainer.style.display = 'flex';
+                            new Notification('通知已開啟', { body: '我們將在每天指定時間提醒您學習！' });
+                        } else {
+                            alert('請允許通知權限以使用此功能');
+                            e.target.checked = false;
+                        }
+                    } else {
+                        localStorage.setItem('notifyEnabled', 'false');
+                        timeContainer.style.display = 'none';
+                    }
+                });
+            }
+
+            if (timeInput) {
+                timeInput.addEventListener('change', (e) => {
+                    localStorage.setItem('notifyTime', e.target.value);
+                });
+            }
+        }, 100);
     }
 }
 

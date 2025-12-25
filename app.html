@@ -10,6 +10,7 @@
         rel="stylesheet">
     <link rel="stylesheet" href="./style.css">
     <link rel="stylesheet" href="./src/app-styles.css">
+    <link rel="stylesheet" href="./src/switch.css">
     <style>
         /* App Layout */
         body {
@@ -315,6 +316,9 @@
                 style="font-size: 0.8rem; color: var(--color-text-muted); cursor: pointer; background: #eee; padding: 4px 8px; border-radius: 4px;">
                 登出</div>
         </div>
+        <div id="mobile-countdown"
+            style="margin-top: 8px; font-size: 0.9rem; font-weight: bold; color: var(--color-primary); text-align: center; width: 100%;">
+        </div>
     </header>
 
     <nav class="sidebar">
@@ -368,12 +372,26 @@
         </div>
 
         <div class="search-container">
-            <input type="text" class="search-input" placeholder="搜尋單字..." id="search-input">
-            <select class="filter-select" id="sort-select">
-                <option value="alpha">A-Z 排序</option>
-                <option value="frequency">考出頻率</option>
-                <option value="level">難易度</option>
+            <input type="text" id="search-input" class="search-input" placeholder="搜尋單字... (支援模糊搜尋)">
+            <select id="level-filter" class="search-select">
+                <option value="all">全部等級</option>
+                <option value="1">Level 1</option>
+                <option value="2">Level 2</option>
+                <option value="3">Level 3</option>
+                <option value="4">Level 4</option>
+                <option value="5">Level 5</option>
+                <option value="6">Level 6</option>
             </select>
+            <select id="sort-select" class="search-select">
+                <option value="alpha">A-Z</option>
+                <option value="frequency">頻率</option>
+                <option value="level">等級</option>
+            </select>
+            <button id="sort-order-btn" class="icon-btn"
+                style="border: 1px solid #e0e0e0; border-radius: 8px; width: 44px; justify-content: center;"
+                title="切換排序順序">
+                ⬇️
+            </button>
         </div>
 
         <div id="word-list">
