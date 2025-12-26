@@ -788,6 +788,9 @@ window.startQuiz = (type, customPool = null) => {
     quizState.score = 0;
     quizState.incorrectWords = [];
 
+    // Reset container classes to avoid grid layout interference
+    if (elements.wordList) elements.wordList.className = '';
+
     let pool = customPool || [...vocabularyDatabase];
     let qCount = 5;
 
