@@ -769,7 +769,7 @@ if (!savedResult || savedResult.version !== PLACEMENT_TEST_VERSION) {
 } else {
     renderLearningDashboard(savedResult);
 }
-}
+
 
 function renderPlacementIntro() {
     elements.wordList.innerHTML = `
