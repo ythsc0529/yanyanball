@@ -1088,8 +1088,17 @@ function renderDailyLessonPhase() {
         const progress = {
             date: date,
             finished: [...lesson.newWords.map(w => w.id), ...lesson.reviewWords.map(w => w.id)],
-            score: 100 // Dummy score or calc
+            // Add a flag to explicitly mark as done
+            isCompleted: true
         };
+
+        // Save to SyncManager
+        // We need to store more than just array, or infer from array length?
+        // Let's store the whole object if possible, or just the array as before but interpret checking differently.
+        // Current SyncManager.state.dailyProgress is { "YYYY-MM-DD": [ids...] }
+        // If we have IDs, it means we studied?
+        // Let's rely on the presence of the date key in dailyProgress with > 0 items as "Done".
+
         SyncManager.saveLocalAndSync(currentUser?.uid, 'dailyProgress', { ...SyncManager.state.dailyProgress, [date]: progress.finished });
 
         // Also add new words to mastered? Or just "encountered"?
@@ -1097,8 +1106,7 @@ function renderDailyLessonPhase() {
         lesson.newWords.forEach(w => masteredWords.add(w.id));
         SyncManager.saveLocalAndSync(currentUser?.uid, 'masteredWords', masteredWords);
 
-        // Mark UI done
-        localStorage.setItem(`dailyReviewDone_${date}`, 'true');
+        // UI update relies on re-rendering Dashboard, which checks logic.
 
         container.innerHTML = `
             <div class="quiz-container">
