@@ -118,6 +118,13 @@ function loadLocalData() {
     starredWords = new Set(JSON.parse(localStorage.getItem('starredWords') || '[]'));
     masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || '[]'));
     customBooks = JSON.parse(localStorage.getItem('customBooks') || '[]');
+    // SyncManager state should be source of truth after sync, but this is fine for init.
+    // ensure SyncManager state is reflected if needed
+    if (SyncManager.state.placementTestResult) {
+        // Optional: update UI related to level if it depends on this variable?
+        // Currently renderLearningDashboard reads local var or passed arg.
+        // We should ensure SyncManager loads it into localStorage which it does in syncUserDown.
+    }
 }
 
 function checkAuth() {
@@ -811,6 +818,18 @@ window.startQuiz = (type, customPool = null) => {
     });
 
     renderQuestion();
+    renderQuestion();
+};
+
+window.startBookQuiz = (bookId) => {
+    const book = customBooks.find(b => b.id === bookId);
+    if (!book) return;
+    const bookWords = vocabularyDatabase.filter(w => book.wordIds.includes(w.id));
+    if (bookWords.length < 4) {
+        alert("單字數量不足，無法開始測驗 (至少需4個)");
+        return;
+    }
+    window.startQuiz('quiz', bookWords);
 };
 
 function renderQuestion() {
@@ -917,7 +936,7 @@ function finishQuiz() {
         else if (quizState.score >= 3) levelName = '進階 (Advanced)';
 
         const result = { level: levelName, score: quizState.score, date: new Date().toISOString() };
-        localStorage.setItem('placementTestResult', JSON.stringify(result));
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'placementTestResult', result);
         renderLearningDashboard(result);
     } else {
         const hasErrors = quizState.incorrectWords.length > 0;
@@ -1441,7 +1460,7 @@ window.renderBookDetail = (bookId) => {
             <h2 style="margin:0;">${book.name}</h2>
         </div>
         <div style="display:flex; gap:10px;">
-            <button class="btn btn-primary" onclick="startQuiz('quiz', displayedWords)" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗此本</button>
+            <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗此本</button>
             <button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>
         </div>
     `;

@@ -9,7 +9,8 @@ export const SyncManager = {
         dailyProgress: {}, // { "YYYY-MM-DD": { finished: [], score: 0 } }
         customBooks: [], // [{ id, name, wordIds: [] }]
         streakData: { count: 0, lastDate: "", max: 0 },
-        fcmToken: null
+        fcmToken: null,
+        placementTestResult: null // { level: "", score: 0, date: "" }
     },
 
     init() {
@@ -25,6 +26,7 @@ export const SyncManager = {
         this.state.customBooks = JSON.parse(localStorage.getItem('customBooks') || '[]');
         this.state.streakData = JSON.parse(localStorage.getItem('streakData') || '{"count":0, "lastDate":"", "max":0}');
         this.state.fcmToken = localStorage.getItem('fcmToken');
+        this.state.placementTestResult = JSON.parse(localStorage.getItem('placementTestResult') || 'null');
     },
 
     async syncUserDown(uid) {
@@ -113,6 +115,14 @@ export const SyncManager = {
                     localStorage.setItem('fcmToken', data.fcmToken);
                 }
 
+                // 7. Placement Result
+                if (data.placementTestResult) {
+                    // Cloud overwrites local for level usually (or take newest?)
+                    // Let's assume Cloud is truth.
+                    this.state.placementTestResult = data.placementTestResult;
+                    localStorage.setItem('placementTestResult', JSON.stringify(data.placementTestResult));
+                }
+
                 // Immediately sync back UP to ensure cloud has the union result (convergence)
                 await this.syncUserUp(uid);
 
@@ -139,6 +149,10 @@ export const SyncManager = {
 
         if (this.state.fcmToken) {
             payload.fcmToken = this.state.fcmToken;
+        }
+
+        if (this.state.placementTestResult) {
+            payload.placementTestResult = this.state.placementTestResult;
         }
 
         try {
@@ -176,6 +190,11 @@ export const SyncManager = {
             this.state.streakData = value;
             localStorage.setItem('streakData', JSON.stringify(value));
             if (uid) await updateDoc(doc(db, "users", uid), { streakData: value });
+        }
+        else if (key === 'placementTestResult') {
+            this.state.placementTestResult = value;
+            localStorage.setItem('placementTestResult', JSON.stringify(value));
+            if (uid) await updateDoc(doc(db, "users", uid), { placementTestResult: value });
         }
     },
 
