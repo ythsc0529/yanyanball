@@ -12,6 +12,7 @@ import { getToken } from 'firebase/messaging';
 console.log("App.js loaded v5 + Sync");
 
 // State
+// State
 let currentUser = null;
 let currentView = 'vocabulary';
 let displayedWords = [];
@@ -20,6 +21,7 @@ let masteredWords = new Set();
 let customBooks = []; // Array of { id, name, wordIds: [] }
 const EXAM_DATE = '2026-01-17T09:00:00';
 const ITEMS_PER_PAGE = 20;
+const PLACEMENT_TEST_VERSION = '2.0'; // Updated to force retake for new system
 let currentPage = 1;
 
 // Definition Cache
@@ -755,12 +757,18 @@ function checkPlacementTest() {
         `;
         return;
     }
-    const hasTaken = localStorage.getItem('placementTestResult');
-    if (!hasTaken) {
-        renderPlacementIntro();
-    } else {
-        renderLearningDashboard(JSON.parse(hasTaken));
-    }
+}
+// Check SyncManager first for truth, fallback to local if same version
+// Actually SyncManager should be populated.
+// Check version
+const savedResult = SyncManager.state.placementTestResult || JSON.parse(localStorage.getItem('placementTestResult') || 'null');
+
+if (!savedResult || savedResult.version !== PLACEMENT_TEST_VERSION) {
+    console.log("No valid placement result or old version. Force retake.");
+    renderPlacementIntro();
+} else {
+    renderLearningDashboard(savedResult);
+}
 }
 
 function renderPlacementIntro() {
@@ -938,7 +946,12 @@ function finishQuiz() {
         if (quizState.score === 5) levelName = '精通 (Master)';
         else if (quizState.score >= 3) levelName = '進階 (Advanced)';
 
-        const result = { level: levelName, score: quizState.score, date: new Date().toISOString() };
+        const result = {
+            level: levelName,
+            score: quizState.score,
+            date: new Date().toISOString(),
+            version: PLACEMENT_TEST_VERSION
+        };
         SyncManager.saveLocalAndSync(currentUser?.uid, 'placementTestResult', result);
         renderLearningDashboard(result);
     } else {
