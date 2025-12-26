@@ -1,4 +1,4 @@
-import { auth, logout } from './auth';
+﻿import { auth, logout } from './auth';
 import { DailyLogic } from './daily_logic.js';
 import { db } from './firebase';
 import { vocabularyDatabase } from './data';
@@ -544,36 +544,55 @@ function openModal(item) {
             <div style="font-size:1.1rem; font-style:italic; color:#333;">"${item.sentence || ''}"</div>
         </div>
 
-        <div style="display:flex; justify-content:center; gap:20px; margin-top:30px;">
+        <div style="display:flex; justify-content:center; gap:15px; margin-top:30px;">
             <button class="btn btn-secondary" onclick="window.speak('${item.word}')">🔊 發音</button>
             <button class="btn ${isStarred ? 'btn-primary' : 'btn-secondary'}" onclick="window.toggleStarAndRefreshModal('${item.id}', this)">
                 ${isStarred ? '★ 已收藏' : '☆ 收藏'}
             </button>
-            <div style="position:relative; display:inline-block;">
-                <button class="btn btn-secondary" onclick="window.toggleBookDropdown(this)">📚 加入單字本</button>
-                <div class="book-dropdown" style="display:none; position:absolute; bottom:100%; left:50%; transform:translateX(-50%); background:white; box-shadow:0 4px 15px rgba(0,0,0,0.1); border-radius:8px; padding:10px; width:200px; z-index:100;">
-                    ${customBooks.length === 0 ? '<div style="color:#999;font-size:0.9rem;">無自訂單字本</div>' : ''}
-                    ${customBooks.map(book => {
+            <button class="btn btn-secondary" onclick="window.toggleBookPanel(this)">
+                📚 加入單字本
+            </button>
+        </div>
+
+        <!-- Book Panel (Initially Hidden) -->
+        <div id="book-panel" style="display:none; margin-top:20px; text-align:left; background:#f8f9fa; padding:15px; border-radius:12px; border:1px solid #e0e0e0; animation: fadeIn 0.3s;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="margin:0; font-size:1rem; color:#444;">選擇單字本</h4>
+                <button style="background:none; border:none; color:var(--color-primary); font-size:0.9rem; cursor:pointer; font-weight:600;" onclick="window.createBookFromModal('${item.id}')">+ 新增</button>
+            </div>
+            
+            ${customBooks.length === 0 ? '<div style="color:#999; font-size:0.9rem; text-align:center; padding:10px;">尚無單字本，立即建立一個吧！</div>' : ''}
+            
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:200px; overflow-y:auto;">
+                ${customBooks.map(book => {
         const hasWord = book.wordIds.includes(item.id);
         return `
-                            <div style="padding:8px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f0f0f0;"
-                                onclick="window.toggleWordInBook('${book.id}', '${item.id}', this)">
-                                <span>${book.name}</span>
-                                <span>${hasWord ? '✅' : ''}</span>
+                        <div class="book-option ${hasWord ? 'selected' : ''}" 
+                             style="padding:10px; background:white; border-radius:8px; border:1px solid ${hasWord ? 'var(--color-primary)' : '#eee'}; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:all 0.2s;"
+                             onclick="window.toggleWordInBook('${book.id}', '${item.id}', this)">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:1.2rem;">${hasWord ? '📂' : '📁'}</span>
+                                <span style="font-weight:500; color:${hasWord ? 'var(--color-primary)' : '#333'};">${book.name}</span>
                             </div>
-                        `;
+                            ${hasWord ? '<span style="color:var(--color-primary);">✓</span>' : ''}
+                        </div>
+                    `;
     }).join('')}
-                    <div style="padding:8px; color:var(--color-primary); cursor:pointer; text-align:center; font-weight:bold; margin-top:5px;" onclick="window.createBookFromModal('${item.id}')">+ 新增單字本</div>
-                </div>
             </div>
         </div>
     `;
     elements.modal.classList.add('open');
 }
 
-window.toggleBookDropdown = (btn) => {
-    const dd = btn.nextElementSibling;
-    dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+window.toggleBookPanel = (btn) => {
+    const panel = document.getElementById('book-panel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        btn.classList.add('active'); // Optional styling
+    } else {
+        panel.style.display = 'none';
+        btn.classList.remove('active');
+    }
 };
 
 window.toggleWordInBook = (bookId, wordId, div) => {
@@ -582,10 +601,25 @@ window.toggleWordInBook = (bookId, wordId, div) => {
 
     if (book.wordIds.includes(wordId)) {
         book.wordIds = book.wordIds.filter(id => id !== wordId);
-        div.querySelector('span:last-child').textContent = '';
+        // Optimize UI update without full re-render
+        div.classList.remove('selected');
+        div.style.border = '1px solid #eee';
+        div.querySelector('div span:nth-child(2)').style.color = '#333';
+        div.querySelector('div span:first-child').textContent = '📁';
+        const check = div.querySelector('span:last-child');
+        if (check && check.textContent === '✓') check.remove();
     } else {
         book.wordIds.push(wordId);
-        div.querySelector('span:last-child').textContent = '✅';
+        div.classList.add('selected');
+        div.style.border = '1px solid var(--color-primary)';
+        div.querySelector('div span:nth-child(2)').style.color = 'var(--color-primary)';
+        div.querySelector('div span:first-child').textContent = '📂';
+        if (!div.querySelector('span:last-child') || div.querySelector('span:last-child').textContent !== '✓') {
+            const check = document.createElement('span');
+            check.style.color = 'var(--color-primary)';
+            check.textContent = '✓';
+            div.appendChild(check);
+        }
     }
     SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
 };
@@ -1307,25 +1341,71 @@ function toggleStar(id) {
 // ================= CUSTOM BOOKS =================
 
 window.renderCustomBooks = () => {
+    // Check if empty, maybe show a nice illustration or call to action
+    const isEmpty = customBooks.length === 0;
+
     elements.wordList.innerHTML = `
-        <div class="quiz-container">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2>我的單字本</h2>
-                <button class="btn btn-primary" onclick="window.createNewBook()">+ 建立新單字本</button>
+        <div style="padding: 0 10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:30px;">
+                <div>
+                    <h2 style="margin-bottom:8px;">我的單字本</h2>
+                    <p style="color:#666; margin:0;">管理您的專屬單字集</p>
+                </div>
+                <button class="btn btn-primary" onclick="window.createNewBook()" style="box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);">+ 建立新單字本</button>
             </div>
             
-            <div class="word-grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
-                ${customBooks.length === 0 ? '<div style="grid-column:1/-1; text-align:center; color:#999; padding:40px;">尚未建立任何單字本</div>' : ''}
-                ${customBooks.map(book => `
-                    <div class="word-card" style="cursor:pointer;" onclick="handleNavigation('book_${book.id}')">
-                        <div style="font-size:3rem; margin-bottom:10px;">📓</div>
-                        <h3 style="margin-bottom:10px;">${book.name}</h3>
-                        <p style="color:#666;">${book.wordIds.length} 個單字</p>
+            <div class="word-grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;">
+                ${isEmpty ? `
+                    <div style="grid-column:1/-1; text-align:center; padding:60px 20px; background:white; border-radius:16px; border:2px dashed #eee;">
+                        <div style="font-size:4rem; margin-bottom:20px; opacity:0.5;">📓</div>
+                        <h3 style="color:#666; margin-bottom:10px;">還沒有單字本</h3>
+                        <p style="color:#999; margin-bottom:20px;">建立第一個單字本，開始收錄您想要加強的單字！</p>
+                        <button class="btn btn-secondary" onclick="window.createNewBook()">立即建立</button>
                     </div>
-                `).join('')}
+                ` : ''}
+                
+                ${customBooks.map(book => {
+        // Calculate quick stats? e.g. how many learned? For now just count.
+        // Random gradients for covers?
+        const gradients = [
+            'linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%)',
+            'linear-gradient(135deg, #fca5a5 0%, #ef4444 100%)',
+            'linear-gradient(135deg, #86efac 0%, #22c55e 100%)',
+            'linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%)',
+            'linear-gradient(135deg, #d8b4fe 0%, #a855f7 100%)'
+        ];
+        // Pick strictly based on name char code to be consistent
+        const gIndex = book.id.split('_')[1] % gradients.length;
+        const bg = gradients[Math.abs(gIndex)];
+
+        return `
+                    <div class="book-card" onclick="handleNavigation('book_${book.id}')" 
+                         style="background:white; border-radius:16px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.05); cursor:pointer; transition:transform 0.2s; position:relative;">
+                        <div style="height:100px; background:${bg}; display:flex; align-items:center; justify-content:center;">
+                            <span style="font-size:3rem; color:white; opacity:0.8;">📓</span>
+                        </div>
+                        <div style="padding:20px;">
+                            <h3 style="margin-bottom:8px; font-size:1.2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${book.name}</h3>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:#666; font-size:0.9rem;">${book.wordIds.length} 個單字</span>
+                                <span style="font-size:1.2rem; color:#ddd;">➔</span>
+                            </div>
+                        </div>
+                    </div>
+                    `;
+    }).join('')}
             </div>
         </div>
     `;
+
+    // Add hover effect via JS or inline styles is messy, assume global CSS for .book-card handles hover transform 
+    // or I'll inject style block.
+    // Let's add simple inline style block for hover
+    const style = document.createElement('style');
+    style.innerHTML = `
+        .book-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important; }
+    `;
+    elements.wordList.appendChild(style);
 };
 
 window.renderBookDetail = (bookId) => {
