@@ -392,8 +392,8 @@ function handleNavigation(view) {
         renderCustomBooks();
     }
     else if (view.startsWith('book_')) {
-        const bookId = view.split('book_')[1];
-        renderBookDetail(bookId);
+        // view is the bookId (e.g. book_12345)
+        renderBookDetail(view);
     }
 }
 
@@ -1379,7 +1379,7 @@ window.renderCustomBooks = () => {
         const bg = gradients[Math.abs(gIndex)];
 
         return `
-                    <div class="book-card" onclick="handleNavigation('book_${book.id}')" 
+                    <div class="book-card" onclick="handleNavigation('${book.id}')" 
                          style="background:white; border-radius:16px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.05); cursor:pointer; transition:transform 0.2s; position:relative;">
                         <div style="height:100px; background:${bg}; display:flex; align-items:center; justify-content:center;">
                             <span style="font-size:3rem; color:white; opacity:0.8;">📓</span>
