@@ -116,6 +116,16 @@ document.addEventListener('DOMContentLoaded', () => {
 function loadLocalData() {
     masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || '[]'));
     customBooks = JSON.parse(localStorage.getItem('customBooks') || '[]');
+
+    // Ensure default Favorites book exists
+    if (!customBooks.find(b => b.id === 'book_favorites')) {
+        customBooks.unshift({
+            id: 'book_favorites',
+            name: '⭐ 收藏單字',
+            wordIds: [],
+            creatorName: '系統預設'
+        });
+    }
     // SyncManager state should be source of truth after sync, but this is fine for init.
     // ensure SyncManager state is reflected if needed
     if (SyncManager.state.placementTestResult) {
@@ -697,8 +707,29 @@ window.startRetest = () => {
 };
 
 window.starIncorrectWords = () => {
-    // Deprecated functionality
-    alert('收藏功能已移除，請將錯誤單字加入單字本！');
+    if (quizState.incorrectWords.length === 0) return;
+
+    const favBook = customBooks.find(b => b.id === 'book_favorites');
+    if (!favBook) {
+        alert("找不到收藏單字本！");
+        return;
+    }
+
+    let addedCount = 0;
+    quizState.incorrectWords.forEach(w => {
+        if (!favBook.wordIds.includes(w.id)) {
+            favBook.wordIds.push(w.id);
+            addedCount++;
+        }
+    });
+
+    if (addedCount > 0) {
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+        alert(`已將 ${addedCount} 個錯誤單字加入「收藏單字」本！`);
+    } else {
+        alert('錯誤單字都已經在收藏本裡囉！');
+    }
+    handleNavigation('quiz'); // Refresh view
 };
 
 function checkPlacementTest() {
@@ -805,7 +836,7 @@ function renderQuestion() {
     const title = quizState.type === 'placement' ? '分級測試' : '隨機測驗';
 
     elements.wordList.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
                 <span style="font-weight:bold;">${title}</span>
                 <span style="color:#999;">${quizState.index + 1} / ${total}</span>
@@ -902,7 +933,7 @@ function finishQuiz() {
     } else {
         const hasErrors = quizState.incorrectWords.length > 0;
         elements.wordList.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card">
                 <h3>測驗完成！</h3>
                 <div style="font-size:4rem; font-weight:800; color:var(--color-primary); margin:20px 0;">
@@ -970,7 +1001,7 @@ function renderDailyLessonPhase() {
 
     if (state.phase === 'intro') {
         container.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card">
                 <h3>今日任務</h3>
                 <p>今天將學習 ${lesson.newWords.length} 個新單字，並複習 ${lesson.reviewWords.length} 個單字。</p>
@@ -1009,7 +1040,7 @@ function renderDailyLessonPhase() {
         const word = pool[state.subIndex];
         // Render Word Card for Learning
         container.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card">
                 <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">學習新單字 (${state.subIndex + 1}/${pool.length})</div>
                 <h2 style="font-size:3rem; color:var(--color-primary); margin-bottom:10px;">${word.word}</h2>
@@ -1051,7 +1082,7 @@ function renderDailyLessonPhase() {
         options.sort(() => Math.random() - 0.5);
 
         container.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card">
                 <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">測驗 (${state.phase === 'quiz_new' ? '新單字' : '複習'}) (${state.subIndex + 1}/${pool.length})</div>
                 <h2 style="font-size:2.5rem; margin-bottom:30px;">${target.word}</h2>
@@ -1089,7 +1120,7 @@ function renderDailyLessonPhase() {
         // UI update relies on re-rendering Dashboard, which checks logic.
 
         container.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card">
                 <h3>🎉 完成今日任務！</h3>
                 <p>你已經學習了 ${lesson.total} 個單字。</p>
@@ -1142,7 +1173,7 @@ function renderLearningDashboard(result) {
     const dailyReviewDone = localStorage.getItem(`dailyReviewDone_${today} `);
 
     elements.wordList.innerHTML = `
-        < div class="quiz-container" >
+        <div class="quiz-container">
             <div class="quiz-card" style="text-align:left; background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);">
                 <div style="text-align:center; margin-bottom:30px;">
                     <h3 style="margin-bottom:10px; font-size:1.8rem;">我的學習路徑</h3>
@@ -1396,7 +1427,7 @@ window.renderBookDetail = (bookId) => {
         <div style="display:flex; gap:10px;">
             <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗</button>
             <button class="btn btn-secondary" onclick="window.shareBook('${book.id}')" id="share-btn-${book.id}">${book.shareCode ? '🔗 已分享' : '📤 分享'}</button>
-            <button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>
+            ${book.id !== 'book_favorites' ? `<button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>` : ''}
         </div>
     `;
     elements.wordList.appendChild(header);
@@ -1445,64 +1476,7 @@ window.deleteBook = (id) => {
     handleNavigation('books');
 };
 
-window.openSearchBookModal = () => {
-    const code = prompt("請輸入單字本分享代碼：");
-    if (!code) return;
-    window.searchAndAddBook(code);
-};
 
-window.searchAndAddBook = async (code) => {
-    try {
-        const bookData = await SyncManager.findSharedBook(code);
-        if (!bookData) {
-            alert("找不到此代碼的單字本！");
-            return;
-        }
-
-        const confirmMsg = `找到單字本：\n名稱：${bookData.name} \n製作者：${bookData.creatorName} \n單字數：${bookData.wordIds.length} \n\n是否加入您的單字本？`;
-        if (confirm(confirmMsg)) {
-            // Import logic
-            const newBook = {
-                id: 'book_' + Date.now(),
-                name: bookData.name + " (匯入)",
-                wordIds: bookData.wordIds,
-                creatorName: bookData.creatorName,
-                originalCode: code,
-                originalBookId: bookData.originalBookId
-            };
-            customBooks.push(newBook);
-            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-            renderCustomBooks();
-            alert("成功加入單字本！");
-        }
-    } catch (e) {
-        console.error(e);
-        alert("搜尋失敗，請稍後再試。");
-    }
-};
-
-window.shareBook = async (bookId) => {
-    const book = customBooks.find(b => b.id === bookId);
-    if (!book) return;
-
-    if (book.shareCode) {
-        prompt("此單字本已經分享！分享代碼：", book.shareCode);
-        return;
-    }
-
-    if (!confirm(`確定要分享單字本 "${book.name}" 嗎？\n分享後其他人可透過代碼搜尋並加入此單字本。`)) return;
-
-    try {
-        const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
-        book.shareCode = code;
-        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-        prompt("分享成功！請複製代碼分享給好友：", code);
-        const btn = document.getElementById('share-btn-' + bookId);
-        if (btn) btn.innerText = "🔗 已分享";
-    } catch (e) {
-        alert("分享失敗，請檢查網路連線。");
-    }
-};
 
 // ================= STREAK LOGIC =================
 function updateStreak() {
@@ -1638,9 +1612,46 @@ if (!localStorage.getItem('userJoinDate')) {
 // ================= SHARED BOOK FUNCTIONS =================
 
 window.openSearchBookModal = () => {
-    const code = prompt("請輸入單字本分享代碼：");
-    if (!code) return;
-    window.searchAndAddBook(code);
+    // Use custom modal instead of prompt
+    const modalId = 'search-book-modal';
+    let modal = document.getElementById(modalId);
+
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = modalId;
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:400px; text-align:center;">
+                <button class="close-modal" onclick="document.getElementById('${modalId}').classList.remove('open')">&times;</button>
+                <div style="font-size:3rem; margin-bottom:10px;">🔍</div>
+                <h3>搜尋單字本</h3>
+                <p style="color:#666; margin-bottom:20px;">輸入 6 位數分享代碼</p>
+                <input type="text" id="share-code-input" placeholder="例如: XYE123" 
+                       style="width:100%; padding:12px; border:2px solid #eee; border-radius:12px; font-size:1.2rem; text-align:center; letter-spacing:2px; margin-bottom:20px; text-transform:uppercase;">
+                <button class="btn btn-primary" id="confirm-search-btn" style="width:100%;">搜尋</button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Bind events
+        const input = modal.querySelector('#share-code-input');
+        const btn = modal.querySelector('#confirm-search-btn');
+
+        btn.onclick = () => {
+            const code = input.value.trim();
+            if (!code) return;
+            modal.classList.remove('open');
+            window.searchAndAddBook(code);
+            input.value = '';
+        };
+
+        input.onkeypress = (e) => {
+            if (e.key === 'Enter') btn.click();
+        };
+    }
+
+    // Open modal
+    setTimeout(() => modal.classList.add('open'), 10);
 };
 
 window.searchAndAddBook = async (code) => {
@@ -1680,7 +1691,7 @@ window.shareBook = async (bookId) => {
     if (!book) return;
 
     if (book.shareCode) {
-        prompt("此單字本已經分享！分享代碼：", book.shareCode);
+        window.showShareCodeModal(book.name, book.shareCode);
         return;
     }
 
@@ -1690,15 +1701,61 @@ window.shareBook = async (bookId) => {
         const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
         book.shareCode = code;
         SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-        prompt("分享成功！請複製代碼分享給好友：", code);
+
         const btn = document.getElementById('share-btn-' + bookId);
         if (btn) btn.innerText = "🔗 已分享";
+
+        window.showShareCodeModal(book.name, code);
+
     } catch (e) {
         alert("分享失敗，請檢查網路連線。");
     }
 };
 
+window.showShareCodeModal = (bookName, code) => {
+    const modalId = 'share-code-success-modal';
+    let modal = document.getElementById(modalId);
+
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = modalId;
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:400px; text-align:center;">
+                <button class="close-modal" onclick="document.getElementById('${modalId}').classList.remove('open')">&times;</button>
+                <div style="font-size:3rem; margin-bottom:10px;">🎉</div>
+                <h3>分享成功！</h3>
+                <p style="color:#666; margin-bottom:20px;">"${bookName}" 的分享代碼：</p>
+                <div style="background:#f8f9fa; padding:15px; border-radius:12px; border:2px dashed #ddd; margin-bottom:20px; font-weight:bold; font-size:1.5rem; letter-spacing:2px; user-select:all;" id="share-code-display">
+                    ${code}
+                </div>
+                <button class="btn btn-primary" id="copy-code-btn" style="width:100%;">📋 複製代碼</button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const copyBtn = modal.querySelector('#copy-code-btn');
+        const codeDisplay = modal.querySelector('#share-code-display');
+
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(codeDisplay.innerText.trim()).then(() => {
+                copyBtn.innerText = "✅ 已複製！";
+                setTimeout(() => copyBtn.innerText = "📋 複製代碼", 2000);
+            });
+        };
+    } else {
+        modal.querySelector('#share-code-display').innerText = code;
+        modal.querySelector('p').innerText = `"${bookName}" 的分享代碼：`;
+    }
+
+    setTimeout(() => modal.classList.add('open'), 10);
+};
+
 window.deleteBook = (bookId) => {
+    if (bookId === 'book_favorites') {
+        alert("這是系統預設的收藏單字本，無法刪除！");
+        return;
+    }
     if (!confirm("確定要刪除此單字本嗎？")) return;
     customBooks = customBooks.filter(b => b.id !== bookId);
     SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
