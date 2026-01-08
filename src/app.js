@@ -1664,7 +1664,7 @@ window.searchAndAddBook = async (code) => {
 
         // Prevent adding own book
         if (bookData.creatorId && currentUser && bookData.creatorId === currentUser.uid) {
-            alert("這是您自己製作的單字本，無需重複加入！");
+            window.showInfoModal("這是您自己製作的單字本", "無需重複加入！");
             return;
         }
 
@@ -1787,21 +1787,21 @@ window.shareBook = async (bookId) => {
         return;
     }
 
-    if (!confirm(`確定要分享單字本 "${book.name}" 嗎？\n分享後其他人可透過代碼搜尋並加入此單字本。`)) return;
+    window.showShareConfirmationModal(book, async () => {
+        try {
+            const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
+            book.shareCode = code;
+            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
 
-    try {
-        const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
-        book.shareCode = code;
-        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+            const btn = document.getElementById('share-btn-' + bookId);
+            if (btn) btn.innerText = "🔗 已分享";
 
-        const btn = document.getElementById('share-btn-' + bookId);
-        if (btn) btn.innerText = "🔗 已分享";
+            window.showShareCodeModal(book.name, code);
 
-        window.showShareCodeModal(book.name, code);
-
-    } catch (e) {
-        alert("分享失敗，請檢查網路連線。");
-    }
+        } catch (e) {
+            alert("分享失敗，請檢查網路連線。");
+        }
+    });
 };
 
 window.showShareCodeModal = (bookName, code) => {
@@ -1852,4 +1852,58 @@ window.deleteBook = (bookId) => {
     customBooks = customBooks.filter(b => b.id !== bookId);
     SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
     renderCustomBooks(); // Go back to list
+};
+
+window.showShareConfirmationModal = (book, onConfirm) => {
+    const modalId = 'share-confirm-modal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center; padding: 30px;">
+             <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
+             <div style="font-size:3.5rem; margin-bottom:15px; animation: bounceIn 0.5s;">📤</div>
+             <h3 style="margin-bottom:10px; font-size:1.5rem;">分享單字本</h3>
+             <p style="color:#666; margin-bottom:20px; font-size:1rem; line-height:1.5;">
+                確定要分享 <strong>"${book.name}"</strong> 嗎？<br>
+                分享後將產生一組代碼，其他人可透過代碼搜尋並加入此單字本。
+             </p>
+             <div style="display:flex; gap:10px;">
+                <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('${modalId}').remove()">取消</button>
+                <button class="btn btn-primary" style="flex:1;" id="confirm-share-btn">確定分享</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#confirm-share-btn').onclick = () => {
+        modal.remove();
+        onConfirm();
+    };
+
+    setTimeout(() => modal.classList.add('open'), 10);
+};
+
+window.showInfoModal = (title, message) => {
+    const modalId = 'info-modal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center; padding: 30px;">
+             <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
+             <div style="font-size:3.5rem; margin-bottom:15px; animation: pulse 1s infinite;">💡</div>
+             <h3 style="margin-bottom:10px; font-size:1.5rem;">${title}</h3>
+             <p style="color:#666; margin-bottom:20px; font-size:1rem;">${message}</p>
+             <button class="btn btn-primary" style="width:100%;" onclick="document.getElementById('${modalId}').remove()">我知道了</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('open'), 10);
 };
