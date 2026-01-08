@@ -1662,28 +1662,120 @@ window.searchAndAddBook = async (code) => {
             return;
         }
 
-        const confirmMsg = `找到單字本：\n名稱：${bookData.name}\n製作者：${bookData.creatorName}\n單字數：${bookData.wordIds.length}\n\n是否加入您的單字本？`;
-        if (confirm(confirmMsg)) {
-            // Import logic
-            const newBook = {
-                id: 'book_' + Date.now(),
-                name: bookData.name + " (匯入)",
-                wordIds: bookData.wordIds,
-                creatorName: bookData.creatorName,
-                originalCode: code,
-                originalBookId: bookData.originalBookId
-            };
-            customBooks.push(newBook);
-            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-            // Refresh view if currently on books
-            const activeView = document.querySelector('.nav-link.active')?.dataset.view;
-            if (activeView === 'books') renderCustomBooks();
-            alert("成功加入單字本！");
+        // Prevent adding own book
+        if (bookData.creatorId && currentUser && bookData.creatorId === currentUser.uid) {
+            alert("這是您自己製作的單字本，無需重複加入！");
+            return;
         }
+
+        // Check if already added (optional but good UX)
+        if (customBooks.some(b => b.originalCode === code)) {
+            if (!confirm("您似乎已經加入過此單字本，確定要再次加入嗎？")) return;
+        }
+
+        window.showAddBookConfirmationModal(bookData, code);
+
     } catch (e) {
         console.error(e);
         alert("搜尋失敗，請稍後再試。");
     }
+};
+
+window.showAddBookConfirmationModal = (bookData, code) => {
+    const modalId = 'add-book-confirm-modal';
+    let modal = document.getElementById(modalId);
+
+    if (modal) modal.remove(); // Re-create to ensure fresh state
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+
+    // Aesthetic modal content
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center; padding: 30px;">
+            <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
+            <div style="font-size:3.5rem; margin-bottom:15px; animation: bounceIn 0.5s;">📖</div>
+            <h3 style="margin-bottom:10px; font-size:1.5rem;">發現單字本</h3>
+            
+            <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding:20px; border-radius:16px; margin: 20px 0; text-align:left; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);">
+                <div style="margin-bottom:8px;">
+                     <span style="color:#888; font-size:0.9rem;">名稱</span><br>
+                     <span style="font-weight:700; font-size:1.2rem; color: #2c3e50;">${bookData.name}</span>
+                </div>
+                <div style="margin-bottom:8px;">
+                     <span style="color:#888; font-size:0.9rem;">製作者</span><br>
+                     <span style="font-weight:600; color: #495057;">${bookData.creatorName}</span>
+                </div>
+                 <div>
+                     <span style="color:#888; font-size:0.9rem;">單字數量</span><br>
+                     <span style="font-weight:600; color: #495057;">${bookData.wordIds.length} 個單字</span>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('${modalId}').remove()">取消</button>
+                <button class="btn btn-primary" style="flex:1;" id="confirm-add-btn">確認加入</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#confirm-add-btn').onclick = () => {
+        // Import logic
+        const newBook = {
+            id: 'book_' + Date.now(),
+            name: bookData.name + " (匯入)",
+            wordIds: bookData.wordIds,
+            creatorName: bookData.creatorName,
+            originalCode: code,
+            originalBookId: bookData.originalBookId
+        };
+        customBooks.push(newBook);
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+
+        // Refresh view if currently on books
+        const activeView = document.querySelector('.nav-link.active')?.dataset.view;
+        if (activeView === 'books') renderCustomBooks();
+
+        modal.remove();
+
+        // Success feedback
+        // alert("成功加入單字本！");
+        window.showSuccessModal("成功加入單字本！");
+    };
+
+    setTimeout(() => modal.classList.add('open'), 10);
+};
+
+window.showSuccessModal = (msg) => {
+    const div = document.createElement('div');
+    div.style.position = 'fixed';
+    div.style.top = '20px';
+    div.style.left = '50%';
+    div.style.transform = 'translate(-50%, -20px)';
+    div.style.background = '#4CAF50';
+    div.style.color = 'white';
+    div.style.padding = '12px 24px';
+    div.style.borderRadius = '50px';
+    div.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+    div.style.zIndex = '9999';
+    div.style.fontWeight = 'bold';
+    div.style.transition = 'all 0.3s ease';
+    div.style.opacity = '0';
+    div.innerText = msg;
+    document.body.appendChild(div);
+
+    setTimeout(() => {
+        div.style.transform = 'translate(-50%, 0)';
+        div.style.opacity = '1';
+    }, 10);
+
+    setTimeout(() => {
+        div.style.transform = 'translate(-50%, -20px)';
+        div.style.opacity = '0';
+        setTimeout(() => div.remove(), 300);
+    }, 2000);
 };
 
 window.shareBook = async (bookId) => {
