@@ -1,5 +1,6 @@
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { auth } from './firebase';
 
 export const SyncManager = {
     // Current in-memory state (mirrors localStorage usually)
@@ -204,6 +205,42 @@ export const SyncManager = {
         localStorage.setItem('fcmToken', token);
         if (uid) {
             await updateDoc(doc(db, "users", uid), { fcmToken: token });
+        }
+    },
+
+    // SOCIAL SHARING
+    async shareWordbook(book, userDisplayName) {
+        try {
+            // Generate a simple 6-char code
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            const shareData = {
+                code: code,
+                name: book.name || "未命名單字本",
+                wordIds: book.wordIds || [],
+                creatorName: userDisplayName || "無名氏",
+                creatorId: auth.currentUser?.uid || "anonymous",
+                originalBookId: book.id,
+                createdAt: new Date().toISOString()
+            };
+
+            await addDoc(collection(db, "shared_books"), shareData);
+            return code;
+        } catch (e) {
+            console.error("Share error:", e);
+            throw e;
+        }
+    },
+
+    async findSharedBook(code) {
+        try {
+            const q = query(collection(db, "shared_books"), where("code", "==", code.toUpperCase().trim()));
+            const querySnapshot = await getDocs(q);
+            if (querySnapshot.empty) return null;
+            return querySnapshot.docs[0].data();
+        } catch (e) {
+            console.error("Find book error:", e);
+            throw e; // Propagate error to UI
         }
     }
 };

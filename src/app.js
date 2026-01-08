@@ -12,16 +12,13 @@ import { getToken } from 'firebase/messaging';
 console.log("App.js loaded v5 + Sync");
 
 // State
-// State
 let currentUser = null;
 let currentView = 'vocabulary';
 let displayedWords = [];
-let starredWords = new Set();
 let masteredWords = new Set();
 let customBooks = []; // Array of { id, name, wordIds: [] }
 const EXAM_DATE = '2026-01-17T09:00:00';
 const ITEMS_PER_PAGE = 20;
-const PLACEMENT_TEST_VERSION = '2.0'; // Updated to force retake for new system
 let currentPage = 1;
 
 // Definition Cache
@@ -117,7 +114,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadLocalData() {
-    starredWords = new Set(JSON.parse(localStorage.getItem('starredWords') || '[]'));
     masteredWords = new Set(JSON.parse(localStorage.getItem('masteredWords') || '[]'));
     customBooks = JSON.parse(localStorage.getItem('customBooks') || '[]');
     // SyncManager state should be source of truth after sync, but this is fine for init.
@@ -464,7 +460,7 @@ function renderPaginationList() {
 }
 
 function createCard(item) {
-    const isStarred = starredWords.has(item.id);
+    // Removed isStarred check
     const card = document.createElement('div');
     card.className = 'word-card';
     card.onclick = (e) => {
@@ -483,9 +479,6 @@ function createCard(item) {
         <div class="zh-def" id="def-${item.id}">${item.pos} ${displayDef}</div>
         <div class="card-actions">
             <button class="icon-btn sound" onclick="window.speak('${item.word}')">🔊</button>
-            <button class="icon-btn star ${isStarred ? 'active' : ''}" data-id="${item.id}">
-                ${isStarred ? '★' : '☆'}
-            </button>
         </div>
     `;
 
@@ -496,12 +489,6 @@ function createCard(item) {
             if (el) el.innerHTML = `${item.pos} ${def}`;
         });
     }
-
-    const starBtn = card.querySelector('.star');
-    starBtn.onclick = (e) => {
-        e.stopPropagation();
-        toggleStar(item.id);
-    };
 
     const soundBtn = card.querySelector('.sound');
     soundBtn.onclick = (e) => {
@@ -515,7 +502,6 @@ function createCard(item) {
 // ================= MODAL =================
 
 function openModal(item) {
-    const isStarred = starredWords.has(item.id);
     const hasDef = item.definition && item.definition !== '(暫無釋義)' && item.definition !== '暫無釋義' && item.definition !== '沒有釋義';
 
     // Auto translate if missing
@@ -555,9 +541,6 @@ function openModal(item) {
 
         <div style="display:flex; justify-content:center; gap:15px; margin-top:30px;">
             <button class="btn btn-secondary" onclick="window.speak('${item.word}')">🔊 發音</button>
-            <button class="btn ${isStarred ? 'btn-primary' : 'btn-secondary'}" onclick="window.toggleStarAndRefreshModal('${item.id}', this)">
-                ${isStarred ? '★ 已收藏' : '☆ 收藏'}
-            </button>
             <button class="btn btn-secondary" onclick="window.toggleBookPanel(this)">
                 📚 加入單字本
             </button>
@@ -652,18 +635,11 @@ function closeModal() {
     elements.modal.classList.remove('open');
 }
 
-window.toggleStarAndRefreshModal = (id, btn) => {
-    toggleStar(id);
-    const has = starredWords.has(id);
-    btn.innerHTML = has ? '★ 已收藏' : '☆ 收藏';
-    btn.className = `btn ${has ? 'btn-primary' : 'btn-secondary'}`;
-};
+
 
 // ================= QUIZ & LEARNING =================
 
 function renderQuizOptions() {
-    const hasStarredWords = starredWords.size > 0;
-
     elements.wordList.innerHTML = `
         <div class="quiz-options-grid">
             <div class="quiz-option-card">
@@ -672,15 +648,6 @@ function renderQuizOptions() {
                 <p>從全部單字中隨機抽取 10 題</p>
                 <button class="btn btn-primary" onclick="startQuizMode('all')">開始測驗</button>
             </div>
-            
-            ${hasStarredWords ? `
-            <div class="quiz-option-card">
-                <div class="quiz-icon">⭐</div>
-                <h3>星號單字測驗</h3>
-                <p>從已收藏的 ${starredWords.size} 個單字中測驗</p>
-                <button class="btn btn-primary" onclick="startQuizMode('starred')">開始測驗</button>
-            </div>
-            ` : ''}
             
             <div class="quiz-option-card">
                 <div class="quiz-icon">🎯</div>
@@ -711,12 +678,6 @@ window.startQuizMode = (mode) => {
 
     if (mode === 'all') {
         pool = [...vocabularyDatabase];
-    } else if (mode === 'starred') {
-        pool = vocabularyDatabase.filter(w => starredWords.has(w.id));
-        if (pool.length < 4) {
-            alert('星號單字不足 4 個，無法進行測驗！');
-            return;
-        }
     } else if (mode === 'level') {
         const selectedLevel = parseInt(document.getElementById('level-select').value);
         pool = vocabularyDatabase.filter(w => w.level === selectedLevel);
@@ -736,13 +697,8 @@ window.startRetest = () => {
 };
 
 window.starIncorrectWords = () => {
-    if (quizState.incorrectWords.length === 0) return;
-    quizState.incorrectWords.forEach(w => {
-        starredWords.add(w.id);
-    });
-    localStorage.setItem('starredWords', JSON.stringify([...starredWords]));
-    alert('已將錯誤單字全部加入收藏！');
-    handleNavigation('quiz'); // Refresh view
+    // Deprecated functionality
+    alert('收藏功能已移除，請將錯誤單字加入單字本！');
 };
 
 function checkPlacementTest() {
@@ -757,19 +713,13 @@ function checkPlacementTest() {
         `;
         return;
     }
+    const hasTaken = localStorage.getItem('placementTestResult');
+    if (!hasTaken) {
+        renderPlacementIntro();
+    } else {
+        renderLearningDashboard(JSON.parse(hasTaken));
+    }
 }
-// Check SyncManager first for truth, fallback to local if same version
-// Actually SyncManager should be populated.
-// Check version
-const savedResult = SyncManager.state.placementTestResult || JSON.parse(localStorage.getItem('placementTestResult') || 'null');
-
-if (!savedResult || savedResult.version !== PLACEMENT_TEST_VERSION) {
-    console.log("No valid placement result or old version. Force retake.");
-    renderPlacementIntro();
-} else {
-    renderLearningDashboard(savedResult);
-}
-
 
 function renderPlacementIntro() {
     elements.wordList.innerHTML = `
@@ -779,12 +729,12 @@ function renderPlacementIntro() {
                 <p style="color:#666; margin:20px 0;">初次使用需進行分級測試，以為您安排專屬計畫。</p>
                 <div style="text-align:left; background:#f8f9fa; padding:20px; border-radius:10px; margin-bottom:20px;">
                     <strong>測驗內容：</strong> 5 題單字選擇<br>
-                    <strong>預估時間：</strong> 1 分鐘
+                        <strong>預估時間：</strong> 1 分鐘
                 </div>
                 <button class="btn btn-primary" onclick="startQuiz('placement')">開始分級測試</button>
             </div>
-        </div>
-    `;
+        </div >
+        `;
 }
 
 window.handleNavigation = handleNavigation;
@@ -855,7 +805,7 @@ function renderQuestion() {
     const title = quizState.type === 'placement' ? '分級測試' : '隨機測驗';
 
     elements.wordList.innerHTML = `
-        <div class="quiz-container">
+        < div class="quiz-container" >
             <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
                 <span style="font-weight:bold;">${title}</span>
                 <span style="color:#999;">${quizState.index + 1} / ${total}</span>
@@ -872,8 +822,8 @@ function renderQuestion() {
                     <button class="btn btn-secondary" onclick="stopQuiz()">⛔ 停止測驗</button>
                 </div>
             </div>
-        </div>
-    `;
+        </div >
+        `;
 }
 
 window.submitAnswer = (btn, selected, correct) => {
@@ -946,25 +896,20 @@ function finishQuiz() {
         if (quizState.score === 5) levelName = '精通 (Master)';
         else if (quizState.score >= 3) levelName = '進階 (Advanced)';
 
-        const result = {
-            level: levelName,
-            score: quizState.score,
-            date: new Date().toISOString(),
-            version: PLACEMENT_TEST_VERSION
-        };
+        const result = { level: levelName, score: quizState.score, date: new Date().toISOString() };
         SyncManager.saveLocalAndSync(currentUser?.uid, 'placementTestResult', result);
         renderLearningDashboard(result);
     } else {
         const hasErrors = quizState.incorrectWords.length > 0;
         elements.wordList.innerHTML = `
-            <div class="quiz-container">
-                <div class="quiz-card">
-                    <h3>測驗完成！</h3>
-                    <div style="font-size:4rem; font-weight:800; color:var(--color-primary); margin:20px 0;">
-                        ${quizState.score} / ${quizState.questions.length}
-                    </div>
-                    
-                    ${hasErrors ? `
+        < div class="quiz-container" >
+            <div class="quiz-card">
+                <h3>測驗完成！</h3>
+                <div style="font-size:4rem; font-weight:800; color:var(--color-primary); margin:20px 0;">
+                    ${quizState.score} / ${quizState.questions.length}
+                </div>
+
+                ${hasErrors ? `
                         <div style="margin-bottom:20px; text-align:left; background:#fff5f5; padding:20px; border-radius:12px; border:1px solid #fed7d7;">
                             <h4 style="color:#c53030; margin-bottom:10px;">需要複習的單字：</h4>
                             <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:15px;">
@@ -976,12 +921,12 @@ function finishQuiz() {
                         </div>
                     ` : ''}
 
-                    <div style="display:flex; justify-content:center; gap:10px;">
-                        <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
-                        <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">回到單字庫</button>
-                    </div>
+                <div style="display:flex; justify-content:center; gap:10px;">
+                    <button class="btn btn-secondary" onclick="startQuiz('quiz')">重新開始隨機測驗</button>
+                    <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">回到單字庫</button>
                 </div>
             </div>
+            </div >
         `;
     }
 }
@@ -1025,18 +970,18 @@ function renderDailyLessonPhase() {
 
     if (state.phase === 'intro') {
         container.innerHTML = `
-            <div class="quiz-container">
-                <div class="quiz-card">
-                    <h3>今日任務</h3>
-                    <p>今天將學習 ${lesson.newWords.length} 個新單字，並複習 ${lesson.reviewWords.length} 個單字。</p>
-                    <div style="margin: 30px 0;">
-                        <div style="font-size: 1.2rem; margin-bottom: 10px;">新單字: ${lesson.newWords.length}</div>
-                        <div style="font-size: 1.2rem;">複習: ${lesson.reviewWords.length}</div>
-                    </div>
-                    <button class="btn btn-primary" onclick="window.dailyPhaseNext('learn_new')">開始學習</button>
-                    <button class="btn btn-secondary" style="margin-top:10px;" onclick="handleNavigation('learning')">返回</button>
+        < div class="quiz-container" >
+            <div class="quiz-card">
+                <h3>今日任務</h3>
+                <p>今天將學習 ${lesson.newWords.length} 個新單字，並複習 ${lesson.reviewWords.length} 個單字。</p>
+                <div style="margin: 30px 0;">
+                    <div style="font-size: 1.2rem; margin-bottom: 10px;">新單字: ${lesson.newWords.length}</div>
+                    <div style="font-size: 1.2rem;">複習: ${lesson.reviewWords.length}</div>
                 </div>
+                <button class="btn btn-primary" onclick="window.dailyPhaseNext('learn_new')">開始學習</button>
+                <button class="btn btn-secondary" style="margin-top:10px;" onclick="handleNavigation('learning')">返回</button>
             </div>
+            </div >
         `;
     }
     else if (state.phase.startsWith('learn')) {
@@ -1064,19 +1009,19 @@ function renderDailyLessonPhase() {
         const word = pool[state.subIndex];
         // Render Word Card for Learning
         container.innerHTML = `
-            <div class="quiz-container">
-                <div class="quiz-card">
-                    <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">學習新單字 (${state.subIndex + 1}/${pool.length})</div>
-                    <h2 style="font-size:3rem; color:var(--color-primary); margin-bottom:10px;">${word.word}</h2>
-                    <div class="pos-tag" style="display:inline-block; margin-bottom:20px;">${word.pos}</div>
-                    <div style="font-size:1.5rem; margin-bottom:30px;">${word.definition}</div>
-                    <div style="color:#666; font-style:italic; margin-bottom:40px;">"${word.sentence || 'No example sentence'}"</div>
-                    
-                    <button class="btn btn-secondary" onclick="window.speak('${word.word}')" style="margin-bottom:20px;">🔊 發音</button>
-                    <br>
+        < div class="quiz-container" >
+            <div class="quiz-card">
+                <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">學習新單字 (${state.subIndex + 1}/${pool.length})</div>
+                <h2 style="font-size:3rem; color:var(--color-primary); margin-bottom:10px;">${word.word}</h2>
+                <div class="pos-tag" style="display:inline-block; margin-bottom:20px;">${word.pos}</div>
+                <div style="font-size:1.5rem; margin-bottom:30px;">${word.definition}</div>
+                <div style="color:#666; font-style:italic; margin-bottom:40px;">"${word.sentence || 'No example sentence'}"</div>
+
+                <button class="btn btn-secondary" onclick="window.speak('${word.word}')" style="margin-bottom:20px;">🔊 發音</button>
+                <br>
                     <button class="btn btn-primary" onclick="window.dailyStepNext()">我知道了 (Got it)</button>
-                </div>
             </div>
+            </div >
         `;
         // Auto play sound?
         window.speak(word.word);
@@ -1106,15 +1051,15 @@ function renderDailyLessonPhase() {
         options.sort(() => Math.random() - 0.5);
 
         container.innerHTML = `
-             <div class="quiz-container">
-                <div class="quiz-card">
-                     <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">測驗 (${state.phase === 'quiz_new' ? '新單字' : '複習'}) (${state.subIndex + 1}/${pool.length})</div>
-                     <h2 style="font-size:2.5rem; margin-bottom:30px;">${target.word}</h2>
-                     <div class="quiz-options">
-                        ${options.map(opt => `<button class="option-btn" onclick="window.checkDailyAnswer(this, '${opt}', '${target.definition}')">${opt}</button>`).join('')}
-                     </div>
+        < div class="quiz-container" >
+            <div class="quiz-card">
+                <div style="font-size:0.9rem; color:#999; margin-bottom:20px;">測驗 (${state.phase === 'quiz_new' ? '新單字' : '複習'}) (${state.subIndex + 1}/${pool.length})</div>
+                <h2 style="font-size:2.5rem; margin-bottom:30px;">${target.word}</h2>
+                <div class="quiz-options">
+                    ${options.map(opt => `<button class="option-btn" onclick="window.checkDailyAnswer(this, '${opt}', '${target.definition}')">${opt}</button>`).join('')}
                 </div>
-             </div>
+            </div>
+             </div >
         `;
     }
     else if (state.phase === 'summary') {
@@ -1144,14 +1089,14 @@ function renderDailyLessonPhase() {
         // UI update relies on re-rendering Dashboard, which checks logic.
 
         container.innerHTML = `
-            <div class="quiz-container">
-                <div class="quiz-card">
-                    <h3>🎉 完成今日任務！</h3>
-                    <p>你已經學習了 ${lesson.total} 個單字。</p>
-                    <div style="font-size:3rem; margin:30px 0;">🔥</div>
-                    <button class="btn btn-primary" onclick="handleNavigation('learning')">回到學習首頁</button>
-                </div>
+        < div class="quiz-container" >
+            <div class="quiz-card">
+                <h3>🎉 完成今日任務！</h3>
+                <p>你已經學習了 ${lesson.total} 個單字。</p>
+                <div style="font-size:3rem; margin:30px 0;">🔥</div>
+                <button class="btn btn-primary" onclick="handleNavigation('learning')">回到學習首頁</button>
             </div>
+            </div >
         `;
     }
 }
@@ -1194,11 +1139,11 @@ function renderLearningDashboard(result) {
     const todayLearnedCount = (dailyLog[today] || []).length;
 
     // Check if daily review is done
-    const dailyReviewDone = localStorage.getItem(`dailyReviewDone_${today}`);
+    const dailyReviewDone = localStorage.getItem(`dailyReviewDone_${today} `);
 
     elements.wordList.innerHTML = `
-        <div class="quiz-container">
-             <div class="quiz-card" style="text-align:left; background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);">
+        < div class="quiz-container" >
+            <div class="quiz-card" style="text-align:left; background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);">
                 <div style="text-align:center; margin-bottom:30px;">
                     <h3 style="margin-bottom:10px; font-size:1.8rem;">我的學習路徑</h3>
                     <div style="color:#666;">當前等級: <span class="pos-tag" style="background:var(--color-primary); color:white;">${result.level}</span></div>
@@ -1208,7 +1153,7 @@ function renderLearningDashboard(result) {
                 <div style="display:flex; justify-content:center; margin-bottom:40px;">
                     <div style="position:relative; width:150px; height:150px; border-radius:50%; border:8px solid #eee; display:flex; align-items:center; justify-content:center; flex-direction:column;">
                         <svg style="position:absolute; top:-8px; left:-8px; width:150px; height:150px; transform:rotate(-90deg);">
-                            <circle cx="75" cy="75" r="70" fill="none" stroke="var(--color-primary)" stroke-width="8" 
+                            <circle cx="75" cy="75" r="70" fill="none" stroke="var(--color-primary)" stroke-width="8"
                                 stroke-dasharray="440" stroke-dashoffset="${440 - (todayLearnedCount / 10 * 440)}" stroke-linecap="round" />
                         </svg>
                         <div style="font-size:2.5rem; font-weight:bold; color:var(--color-primary);">${todayLearnedCount}</div>
@@ -1223,7 +1168,7 @@ function renderLearningDashboard(result) {
                         <span style="color:#666;">開啟通知:</span>
                         <label class="switch">
                             <input type="checkbox" id="notify-toggle" ${localStorage.getItem('notifyEnabled') === 'true' ? 'checked' : ''}>
-                            <span class="slider round"></span>
+                                <span class="slider round"></span>
                         </label>
                     </div>
                     <div id="notify-time-container" style="display:${localStorage.getItem('notifyEnabled') === 'true' ? 'flex' : 'none'}; align-items:center; justify-content:space-between; margin-top:10px;">
@@ -1235,25 +1180,25 @@ function renderLearningDashboard(result) {
 
                 <!-- Action Buttons -->
                 <div style="display:grid; gap:16px; margin-bottom:30px; margin-top: 30px;">
-                     <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
+                    <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
                         <div>
                             <h4 style="margin-bottom:4px;">今日單字任務</h4>
                             <p style="font-size:0.9rem; color:#666; margin:0;">${dailyReviewDone ? '已完成今日目標' : '透過系統安排的進度學習'}</p>
                         </div>
-                        <button class="btn ${dailyReviewDone ? 'btn-secondary' : 'btn-primary'}" 
-                            onclick="window.startDailyLesson()" 
+                        <button class="btn ${dailyReviewDone ? 'btn-secondary' : 'btn-primary'}"
+                            onclick="window.startDailyLesson()"
                             ${dailyReviewDone ? 'disabled' : ''}>
                             ${dailyReviewDone ? '✅ 已完成' : '🚀 開始學習'}
                         </button>
-                     </div>
+                    </div>
 
-                     <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
+                    <div style="background:white; padding:20px; border-radius:16px; box-shadow:0 4px 15px rgba(0,0,0,0.05); display:flex; align-items:center; justify-content:space-between;">
                         <div>
                             <h4 style="margin-bottom:4px;">自主練習</h4>
                             <p style="font-size:0.9rem; color:#666; margin:0;">自由探索單字庫</p>
                         </div>
                         <button class="btn btn-primary" onclick="handleNavigation('vocabulary')">📖 前往單字庫</button>
-                     </div>
+                    </div>
                 </div>
 
                 <!-- Stats -->
@@ -1270,8 +1215,8 @@ function renderLearningDashboard(result) {
                     </div>
                 </div>
             </div>
-        </div>
-    `;
+        </div >
+        `;
 
     // Bind Notification Events
     setTimeout(() => {
@@ -1341,60 +1286,36 @@ window.speak = (text) => {
     speechSynthesis.speak(utterance);
 };
 
-function loadStarredWords() {
-    const stored = localStorage.getItem('starredWords');
-    if (stored) {
-        starredWords = new Set(JSON.parse(stored));
-    }
-}
+/* removed loadStarredWords */
 
 
 // Expose functions to global scope for inline handlers
 window.openModal = openModal;
 window.checkPlacementTest = checkPlacementTest;
-window.toggleStar = toggleStar;
+/* removed toggleStar */
 window.startQuiz = startQuiz;
 window.startRetest = startRetest;
 window.starIncorrectWords = starIncorrectWords;
 window.handleNavigation = handleNavigation;
 
-function toggleStar(id) {
-    if (starredWords.has(id)) starredWords.delete(id);
-    else starredWords.add(id);
-
-    // Use SyncManager for storage and cloud sync
-    SyncManager.saveLocalAndSync(currentUser ? currentUser.uid : null, 'starredWords', starredWords);
-
-    // Update UI
-    const btns = document.querySelectorAll(`.icon-btn.star[data-id="${id}"]`);
-    btns.forEach(btn => {
-        btn.innerHTML = starredWords.has(id) ? '★' : '☆';
-        btn.classList.toggle('active', starredWords.has(id));
-    });
-
-    const activeLink = document.querySelector('.nav-link.active, .bottom-nav-item.active');
-    if (activeLink && activeLink.dataset.view === 'stars') {
-        const starry = vocabularyDatabase.filter(w => starredWords.has(w.id));
-        displayedWords = starry;
-        currentPage = 1;
-        renderPaginationList();
-    }
-}
+/* removed toggleStar */
 
 // ================= CUSTOM BOOKS =================
 
 window.renderCustomBooks = () => {
-    // Check if empty, maybe show a nice illustration or call to action
     const isEmpty = customBooks.length === 0;
 
     elements.wordList.innerHTML = `
         <div style="padding: 0 10px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:30px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:30px; flex-wrap:wrap; gap:10px;">
                 <div>
                     <h2 style="margin-bottom:8px;">我的單字本</h2>
                     <p style="color:#666; margin:0;">管理您的專屬單字集</p>
                 </div>
-                <button class="btn btn-primary" onclick="window.createNewBook()" style="box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);">+ 建立新單字本</button>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-secondary" onclick="window.openSearchBookModal()">🔍 搜尋共享單字本</button>
+                    <button class="btn btn-primary" onclick="window.createNewBook()" style="box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);">+ 建立新單字本</button>
+                </div>
             </div>
             
             <div class="word-grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;">
@@ -1402,14 +1323,12 @@ window.renderCustomBooks = () => {
                     <div style="grid-column:1/-1; text-align:center; padding:60px 20px; background:white; border-radius:16px; border:2px dashed #eee;">
                         <div style="font-size:4rem; margin-bottom:20px; opacity:0.5;">📓</div>
                         <h3 style="color:#666; margin-bottom:10px;">還沒有單字本</h3>
-                        <p style="color:#999; margin-bottom:20px;">建立第一個單字本，開始收錄您想要加強的單字！</p>
+                        <p style="color:#999; margin-bottom:20px;">建立第一個單字本，或搜尋他人的單字本！</p>
                         <button class="btn btn-secondary" onclick="window.createNewBook()">立即建立</button>
                     </div>
                 ` : ''}
                 
                 ${customBooks.map(book => {
-        // Calculate quick stats? e.g. how many learned? For now just count.
-        // Random gradients for covers?
         const gradients = [
             'linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%)',
             'linear-gradient(135deg, #fca5a5 0%, #ef4444 100%)',
@@ -1417,18 +1336,19 @@ window.renderCustomBooks = () => {
             'linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%)',
             'linear-gradient(135deg, #d8b4fe 0%, #a855f7 100%)'
         ];
-        // Pick strictly based on name char code to be consistent
-        const gIndex = book.id.split('_')[1] % gradients.length;
-        const bg = gradients[Math.abs(gIndex)];
+        const gIndex = (book.id.split('_')[1] || 0) % gradients.length;
+        const bg = gradients[Math.abs(gIndex) || 0];
 
         return `
                     <div class="book-card" onclick="handleNavigation('${book.id}')" 
                          style="background:white; border-radius:16px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.05); cursor:pointer; transition:transform 0.2s; position:relative;">
-                        <div style="height:100px; background:${bg}; display:flex; align-items:center; justify-content:center;">
+                        <div style="height:100px; background:${bg}; display:flex; align-items:center; justify-content:center; position:relative;">
                             <span style="font-size:3rem; color:white; opacity:0.8;">📓</span>
+                            ${book.shareCode ? `<span style="position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.2); color:white; padding:4px 8px; border-radius:10px; font-size:0.8rem;">已分享</span>` : ''}
                         </div>
                         <div style="padding:20px;">
                             <h3 style="margin-bottom:8px; font-size:1.2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${book.name}</h3>
+                            <p style="font-size:0.9rem; color:#999; margin-bottom:12px;">${book.creatorName ? `製作者: ${book.creatorName}` : '私人單字本'}</p>
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:#666; font-size:0.9rem;">${book.wordIds.length} 個單字</span>
                                 <span style="font-size:1.2rem; color:#ddd;">➔</span>
@@ -1441,9 +1361,7 @@ window.renderCustomBooks = () => {
         </div>
     `;
 
-    // Add hover effect via JS or inline styles is messy, assume global CSS for .book-card handles hover transform 
-    // or I'll inject style block.
-    // Let's add simple inline style block for hover
+    // Inject style for hover
     const style = document.createElement('style');
     style.innerHTML = `
         .book-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important; }
@@ -1476,7 +1394,8 @@ window.renderBookDetail = (bookId) => {
             <h2 style="margin:0;">${book.name}</h2>
         </div>
         <div style="display:flex; gap:10px;">
-            <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗此本</button>
+            <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗</button>
+            <button class="btn btn-secondary" onclick="window.shareBook('${book.id}')" id="share-btn-${book.id}">${book.shareCode ? '🔗 已分享' : '📤 分享'}</button>
             <button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>
         </div>
     `;
@@ -1526,6 +1445,65 @@ window.deleteBook = (id) => {
     handleNavigation('books');
 };
 
+window.openSearchBookModal = () => {
+    const code = prompt("請輸入單字本分享代碼：");
+    if (!code) return;
+    window.searchAndAddBook(code);
+};
+
+window.searchAndAddBook = async (code) => {
+    try {
+        const bookData = await SyncManager.findSharedBook(code);
+        if (!bookData) {
+            alert("找不到此代碼的單字本！");
+            return;
+        }
+
+        const confirmMsg = `找到單字本：\n名稱：${bookData.name} \n製作者：${bookData.creatorName} \n單字數：${bookData.wordIds.length} \n\n是否加入您的單字本？`;
+        if (confirm(confirmMsg)) {
+            // Import logic
+            const newBook = {
+                id: 'book_' + Date.now(),
+                name: bookData.name + " (匯入)",
+                wordIds: bookData.wordIds,
+                creatorName: bookData.creatorName,
+                originalCode: code,
+                originalBookId: bookData.originalBookId
+            };
+            customBooks.push(newBook);
+            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+            renderCustomBooks();
+            alert("成功加入單字本！");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("搜尋失敗，請稍後再試。");
+    }
+};
+
+window.shareBook = async (bookId) => {
+    const book = customBooks.find(b => b.id === bookId);
+    if (!book) return;
+
+    if (book.shareCode) {
+        prompt("此單字本已經分享！分享代碼：", book.shareCode);
+        return;
+    }
+
+    if (!confirm(`確定要分享單字本 "${book.name}" 嗎？\n分享後其他人可透過代碼搜尋並加入此單字本。`)) return;
+
+    try {
+        const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
+        book.shareCode = code;
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+        prompt("分享成功！請複製代碼分享給好友：", code);
+        const btn = document.getElementById('share-btn-' + bookId);
+        if (btn) btn.innerText = "🔗 已分享";
+    } catch (e) {
+        alert("分享失敗，請檢查網路連線。");
+    }
+};
+
 // ================= STREAK LOGIC =================
 function updateStreak() {
     const now = new Date();
@@ -1556,7 +1534,7 @@ function renderProfile() {
     const isGuest = currentUser?.isAnonymous;
     const joinDate = localStorage.getItem('userJoinDate') || new Date().toISOString();
 
-    // Calculate vocabulary level based on starred words
+    // Calculate vocabulary level based on quiz results
     const estimatedVocabulary = calculateVocabularyLevel();
 
     if (isGuest) {
@@ -1608,24 +1586,14 @@ function renderProfile() {
                         <div class="stat-value">${customBooks.length}</div>
                         <div class="stat-label">單字本</div>
                     </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">⭐</div>
-                        <div class="stat-value">${starredWords.size}</div>
-                        <div class="stat-label">收藏單字</div>
-                    </div>
                 </div>
                 
                 <div class="info-card">
                     <h3>學習建議</h3>
                     <p>${getLearningAdvice()}</p>
                 </div>
-
-                <!-- Old Notification Area Removed -->
             </div>
         `;
-
-        // Bind Notification Events (Moved to Learning Dashboard, but keep here just in case? No, remove to avoid duplicate ID issues)
     }
 }
 
@@ -1666,3 +1634,73 @@ function getLearningAdvice() {
 if (!localStorage.getItem('userJoinDate')) {
     localStorage.setItem('userJoinDate', new Date().toISOString());
 }
+
+// ================= SHARED BOOK FUNCTIONS =================
+
+window.openSearchBookModal = () => {
+    const code = prompt("請輸入單字本分享代碼：");
+    if (!code) return;
+    window.searchAndAddBook(code);
+};
+
+window.searchAndAddBook = async (code) => {
+    try {
+        const bookData = await SyncManager.findSharedBook(code);
+        if (!bookData) {
+            alert("找不到此代碼的單字本！");
+            return;
+        }
+
+        const confirmMsg = `找到單字本：\n名稱：${bookData.name}\n製作者：${bookData.creatorName}\n單字數：${bookData.wordIds.length}\n\n是否加入您的單字本？`;
+        if (confirm(confirmMsg)) {
+            // Import logic
+            const newBook = {
+                id: 'book_' + Date.now(),
+                name: bookData.name + " (匯入)",
+                wordIds: bookData.wordIds,
+                creatorName: bookData.creatorName,
+                originalCode: code,
+                originalBookId: bookData.originalBookId
+            };
+            customBooks.push(newBook);
+            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+            // Refresh view if currently on books
+            const activeView = document.querySelector('.nav-link.active')?.dataset.view;
+            if (activeView === 'books') renderCustomBooks();
+            alert("成功加入單字本！");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("搜尋失敗，請稍後再試。");
+    }
+};
+
+window.shareBook = async (bookId) => {
+    const book = customBooks.find(b => b.id === bookId);
+    if (!book) return;
+
+    if (book.shareCode) {
+        prompt("此單字本已經分享！分享代碼：", book.shareCode);
+        return;
+    }
+
+    if (!confirm(`確定要分享單字本 "${book.name}" 嗎？\n分享後其他人可透過代碼搜尋並加入此單字本。`)) return;
+
+    try {
+        const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
+        book.shareCode = code;
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+        prompt("分享成功！請複製代碼分享給好友：", code);
+        const btn = document.getElementById('share-btn-' + bookId);
+        if (btn) btn.innerText = "🔗 已分享";
+    } catch (e) {
+        alert("分享失敗，請檢查網路連線。");
+    }
+};
+
+window.deleteBook = (bookId) => {
+    if (!confirm("確定要刪除此單字本嗎？")) return;
+    customBooks = customBooks.filter(b => b.id !== bookId);
+    SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+    renderCustomBooks(); // Go back to list
+};
