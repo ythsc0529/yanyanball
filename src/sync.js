@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { auth } from './firebase';
 
 export const SyncManager = {
@@ -319,16 +319,17 @@ export const SyncManager = {
     },
 
     // Toggle co-edit status (Owner only)
-    async toggleCoeditStatus(code, isActive) {
+    // Delete shared book (Stop Co-edit)
+    async deleteSharedBook(code) {
         try {
             const q = query(collection(db, "shared_books"), where("code", "==", code));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
                 const docRef = querySnapshot.docs[0].ref;
-                await updateDoc(docRef, { isActive: isActive });
+                await deleteDoc(docRef);
             }
         } catch (e) {
-            console.error("Toggle co-edit error:", e);
+            console.error("Delete shared book error:", e);
             throw e;
         }
     }

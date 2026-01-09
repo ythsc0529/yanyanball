@@ -1936,19 +1936,29 @@ window.startCoeditFlow = async (book) => {
         if (book.coeditCode) {
             window.showCoeditModal(book.name, book.coeditCode, true);
         } else {
-            // Confirm creation
-            if (!confirm("確定要開啟共編功能嗎？\n這將產生一個永久代碼，擁有此代碼的使用者皆可編輯此單字本。")) return;
+            window.showConfirmModal(
+                "開啟共編功能",
+                "確定要開啟共編功能嗎？<br>這將產生一個永久代碼，擁有此代碼的使用者皆可編輯此單字本。",
+                async () => {
+                    try {
+                        window.showSuccessModal("正在開啟共編...");
+                        const code = await SyncManager.initiateCoedit(book, currentUser?.displayName);
 
-            window.showSuccessModal("正在開啟共編...");
-            const code = await SyncManager.initiateCoedit(book, currentUser?.displayName);
+                        // Update local book state
+                        book.coeditCode = code;
+                        book.isCoeditOwner = true;
+                        book.isCoedit = true;
+                        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
 
-            // Update local book state
-            book.coeditCode = code;
-            book.isCoeditOwner = true;
-            book.isCoedit = true;
-            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-
-            window.showCoeditModal(book.name, code, true);
+                        window.showCoeditModal(book.name, code, true);
+                        // Refresh to show "Co-editing" status immediately
+                        if (document.querySelector('.nav-link.active')?.dataset.view === 'books') renderCustomBooks();
+                    } catch (e) {
+                        console.error(e);
+                        alert("開啟共編失敗");
+                    }
+                }
+            );
         }
     } catch (e) {
         console.error(e);
@@ -2047,28 +2057,63 @@ window.showCoeditModal = (bookName, code, isActive) => {
     };
 
     const stopBtn = modal.querySelector('#stop-coedit-btn');
-    stopBtn.onclick = async () => {
-        if (!confirm("確定要停止共編嗎？\n停止後，其他協作者將無法再加入或更新此單字本，且代碼將失效。")) return;
+    stopBtn.onclick = () => {
+        window.showConfirmModal(
+            "停止共編",
+            "確定要停止共編嗎？<br>停止後，此代碼將<span style='color:red; font-weight:bold;'>立即失效並刪除</span>，所有協作者將無法再更新。",
+            async () => {
+                try {
+                    await SyncManager.deleteSharedBook(code); // Backend DELETE
 
-        try {
-            await SyncManager.toggleCoeditStatus(code, false); // Backend update
+                    // Local update
+                    const book = customBooks.find(b => b.coeditCode === code);
+                    if (book) {
+                        book.coeditCode = null;
+                        book.isCoeditOwner = false;
+                        book.isCoedit = false; // Reset flag
+                        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+                    }
 
-            // Local update
-            const book = customBooks.find(b => b.coeditCode === code);
-            if (book) {
-                book.coeditCode = null;
-                book.isCoeditOwner = false;
-                SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+                    modal.remove();
+                    window.showSuccessModal("已停止共編");
+                    if (document.querySelector('.nav-link.active')?.dataset.view === 'books') renderCustomBooks();
+
+                } catch (e) {
+                    console.error(e);
+                    alert("停止失敗");
+                }
             }
+        );
+    };
 
-            modal.remove();
-            window.showSuccessModal("已停止共編");
-            if (document.querySelector('.nav-link.active')?.dataset.view === 'books') renderCustomBooks();
+    setTimeout(() => modal.classList.add('open'), 10);
+};
 
-        } catch (e) {
-            console.error(e);
-            alert("停止失敗");
-        }
+window.showConfirmModal = (title, message, onConfirm) => {
+    const modalId = 'confirm-modal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center; padding: 30px;">
+             <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
+             <div style="font-size:3.5rem; margin-bottom:15px; animation: bounceIn 0.5s;">⚠️</div>
+             <h3 style="margin-bottom:10px; font-size:1.5rem;">${title}</h3>
+             <p style="color:#666; margin-bottom:20px; font-size:1rem; line-height:1.5;">${message}</p>
+             <div style="display:flex; gap:10px;">
+                <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('${modalId}').remove()">取消</button>
+                <button class="btn btn-primary" style="flex:1;" id="general-confirm-btn">確定</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#general-confirm-btn').onclick = () => {
+        modal.remove();
+        onConfirm();
     };
 
     setTimeout(() => modal.classList.add('open'), 10);
