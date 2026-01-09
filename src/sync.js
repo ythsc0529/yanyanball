@@ -209,25 +209,57 @@ export const SyncManager = {
     },
 
     // SOCIAL SHARING
-    async shareWordbook(book, userDisplayName) {
+
+    // 1. EXPORT MODE (Temporary)
+    async createExportCode(book, userDisplayName) {
         try {
-            // Generate a simple 6-char code
             const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins
 
             const shareData = {
                 code: code,
+                type: 'export',
                 name: book.name || "未命名單字本",
                 wordIds: book.wordIds || [],
                 creatorName: userDisplayName || "無名氏",
                 creatorId: auth.currentUser?.uid || "anonymous",
                 originalBookId: book.id,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                expiresAt: expiresAt
+            };
+
+            await addDoc(collection(db, "shared_books"), shareData);
+            return { code, expiresAt };
+        } catch (e) {
+            console.error("Export error:", e);
+            throw e;
+        }
+    },
+
+    // 2. CO-EDIT MODE (Persistent)
+    async initiateCoedit(book, userDisplayName) {
+        try {
+            // If already has code, return existing?
+            // But we might want to ensure it's active in DB.
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            const shareData = {
+                code: code,
+                type: 'coedit',
+                isActive: true, // Owner can toggle
+                name: book.name || "未命名共編本",
+                wordIds: book.wordIds || [],
+                creatorName: userDisplayName || "無名氏",
+                creatorId: auth.currentUser?.uid || "anonymous",
+                originalBookId: book.id,
+                createdAt: new Date().toISOString(),
+                lastUpdatedAt: new Date().toISOString()
             };
 
             await addDoc(collection(db, "shared_books"), shareData);
             return code;
         } catch (e) {
-            console.error("Share error:", e);
+            console.error("Co-edit init error:", e);
             throw e;
         }
     },
@@ -237,10 +269,67 @@ export const SyncManager = {
             const q = query(collection(db, "shared_books"), where("code", "==", code.toUpperCase().trim()));
             const querySnapshot = await getDocs(q);
             if (querySnapshot.empty) return null;
-            return querySnapshot.docs[0].data();
+
+            const docSnap = querySnapshot.docs[0];
+            const data = docSnap.data();
+
+            // Check Expiration for Export
+            if (data.type === 'export') {
+                if (new Date(data.expiresAt) < new Date()) {
+                    return { status: 'expired' };
+                }
+            }
+
+            // Check Active status for Co-edit
+            if (data.type === 'coedit') {
+                if (!data.isActive) {
+                    return { status: 'closed' };
+                }
+            }
+
+            return { ...data, docId: docSnap.id, status: 'valid' };
         } catch (e) {
             console.error("Find book error:", e);
-            throw e; // Propagate error to UI
+            throw e;
+        }
+    },
+
+    async updateCoeditedBook(code, wordIds) {
+        try {
+            const q = query(collection(db, "shared_books"), where("code", "==", code));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+                const docSnap = querySnapshot.docs[0];
+                const data = docSnap.data();
+
+                if (data.type === 'coedit' && !data.isActive) {
+                    console.warn("Co-edit is closed.");
+                    return;
+                }
+
+                await updateDoc(docSnap.ref, {
+                    wordIds: wordIds,
+                    lastUpdatedAt: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.error("Update co-edit error:", e);
+            throw e;
+        }
+    },
+
+    // Toggle co-edit status (Owner only)
+    async toggleCoeditStatus(code, isActive) {
+        try {
+            const q = query(collection(db, "shared_books"), where("code", "==", code));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+                const docRef = querySnapshot.docs[0].ref;
+                await updateDoc(docRef, { isActive: isActive });
+            }
+        } catch (e) {
+            console.error("Toggle co-edit error:", e);
+            throw e;
         }
     }
 };

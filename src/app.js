@@ -624,6 +624,13 @@ window.toggleWordInBook = (bookId, wordId, div) => {
         }
     }
     SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+
+    // CO-EDIT SYNC
+    if (book.coeditCode) {
+        SyncManager.updateCoeditedBook(book.coeditCode, book.wordIds)
+            .then(() => console.log("Co-edit synced"))
+            .catch(err => console.error("Co-edit sync failed", err));
+    }
 };
 
 window.createBookFromModal = (wordId) => {
@@ -1426,7 +1433,9 @@ window.renderBookDetail = (bookId) => {
         </div>
         <div style="display:flex; gap:10px;">
             <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗</button>
-            <button class="btn btn-secondary" onclick="window.shareBook('${book.id}')" id="share-btn-${book.id}">${book.shareCode ? '🔗 已分享' : '📤 分享'}</button>
+            <button class="btn btn-secondary" onclick="window.shareBook('${book.id}')" id="share-btn-${book.id}">
+                ${book.coeditCode ? '🤝 共編中' : (book.shareCode ? '🔗 已分享' : '📤 分享')}
+            </button>
             ${book.id !== 'book_favorites' ? `<button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>` : ''}
         </div>
     `;
@@ -1662,14 +1671,27 @@ window.searchAndAddBook = async (code) => {
             return;
         }
 
-        // Prevent adding own book
+        // Handle Expiration (Export Mode)
+        if (bookData.status === 'expired') {
+            window.showInfoModal("代碼已過期", "此匯出代碼已失效，請請求新的代碼。");
+            return;
+        }
+
+        // Handle Closed Co-edit
+        if (bookData.status === 'closed') {
+            window.showInfoModal("共編已關閉", "此單字本的共編功能已被擁有者關閉。");
+            return;
+        }
+
+        // Prevent adding own book (Creator check)
         if (bookData.creatorId && currentUser && bookData.creatorId === currentUser.uid) {
             window.showInfoModal("這是您自己製作的單字本", "無需重複加入！");
             return;
         }
 
-        // Check if already added (optional but good UX)
-        if (customBooks.some(b => b.originalCode === code)) {
+        // Check if already added
+        const existing = customBooks.find(b => b.originalCode === code);
+        if (existing) {
             if (!confirm("您似乎已經加入過此單字本，確定要再次加入嗎？")) return;
         }
 
@@ -1725,11 +1747,14 @@ window.showAddBookConfirmationModal = (bookData, code) => {
         // Import logic
         const newBook = {
             id: 'book_' + Date.now(),
-            name: bookData.name + " (匯入)",
+            name: bookData.name + (bookData.type === 'coedit' ? " (共編)" : " (匯入)"),
             wordIds: bookData.wordIds,
             creatorName: bookData.creatorName,
             originalCode: code,
-            originalBookId: bookData.originalBookId
+            originalBookId: bookData.originalBookId,
+            // If coedit, mark it
+            isCoedit: bookData.type === 'coedit',
+            coeditCode: bookData.type === 'coedit' ? code : null
         };
         customBooks.push(newBook);
         SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
@@ -1740,8 +1765,6 @@ window.showAddBookConfirmationModal = (bookData, code) => {
 
         modal.remove();
 
-        // Success feedback
-        // alert("成功加入單字本！");
         window.showSuccessModal("成功加入單字本！");
     };
 
@@ -1778,30 +1801,10 @@ window.showSuccessModal = (msg) => {
     }, 2000);
 };
 
-window.shareBook = async (bookId) => {
+window.shareBook = (bookId) => {
     const book = customBooks.find(b => b.id === bookId);
     if (!book) return;
-
-    if (book.shareCode) {
-        window.showShareCodeModal(book.name, book.shareCode);
-        return;
-    }
-
-    window.showShareConfirmationModal(book, async () => {
-        try {
-            const code = await SyncManager.shareWordbook(book, currentUser?.displayName);
-            book.shareCode = code;
-            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
-
-            const btn = document.getElementById('share-btn-' + bookId);
-            if (btn) btn.innerText = "🔗 已分享";
-
-            window.showShareCodeModal(book.name, code);
-
-        } catch (e) {
-            alert("分享失敗，請檢查網路連線。");
-        }
-    });
+    window.showShareModeSelectionModal(book);
 };
 
 window.showShareCodeModal = (bookName, code) => {
@@ -1854,8 +1857,8 @@ window.deleteBook = (bookId) => {
     renderCustomBooks(); // Go back to list
 };
 
-window.showShareConfirmationModal = (book, onConfirm) => {
-    const modalId = 'share-confirm-modal';
+window.showShareModeSelectionModal = (book) => {
+    const modalId = 'share-mode-modal';
     let modal = document.getElementById(modalId);
     if (modal) modal.remove();
 
@@ -1863,25 +1866,198 @@ window.showShareConfirmationModal = (book, onConfirm) => {
     modal.id = modalId;
     modal.className = 'modal-overlay';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width:400px; text-align:center; padding: 30px;">
+        <div class="modal-content" style="max-width:500px; text-align:center; padding: 40px;">
              <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
-             <div style="font-size:3.5rem; margin-bottom:15px; animation: bounceIn 0.5s;">📤</div>
-             <h3 style="margin-bottom:10px; font-size:1.5rem;">分享單字本</h3>
-             <p style="color:#666; margin-bottom:20px; font-size:1rem; line-height:1.5;">
-                確定要分享 <strong>"${book.name}"</strong> 嗎？<br>
-                分享後將產生一組代碼，其他人可透過代碼搜尋並加入此單字本。
-             </p>
-             <div style="display:flex; gap:10px;">
-                <button class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('${modalId}').remove()">取消</button>
-                <button class="btn btn-primary" style="flex:1;" id="confirm-share-btn">確定分享</button>
-            </div>
+             <h3 style="margin-bottom:30px; font-size:1.8rem;">選擇分享模式</h3>
+             
+             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                <!-- Export Mode -->
+                <div class="share-option" id="btn-export" style="background:#f8f9fa; padding:20px; border-radius:16px; border:2px solid #eee; cursor:pointer; transition:all 0.2s;">
+                    <div style="font-size:3rem; margin-bottom:10px;">📤</div>
+                    <div style="font-weight:bold; font-size:1.2rem; margin-bottom:5px;">單次匯出</div>
+                    <p style="color:#666; font-size:0.9rem; margin:0;">產生 15 分鐘臨時代碼<br>供他人單次匯入複製</p>
+                </div>
+
+                <!-- Co-edit Mode -->
+                <div class="share-option" id="btn-coedit" style="background:#f8f9fa; padding:20px; border-radius:16px; border:2px solid #eee; cursor:pointer; transition:all 0.2s;">
+                    <div style="font-size:3rem; margin-bottom:10px;">🤝</div>
+                    <div style="font-weight:bold; font-size:1.2rem; margin-bottom:5px;">共同編輯</div>
+                    <p style="color:#666; font-size:0.9rem; margin:0;">產生永久代碼<br>多人共同維護單字本</p>
+                </div>
+             </div>
         </div>
     `;
     document.body.appendChild(modal);
 
-    modal.querySelector('#confirm-share-btn').onclick = () => {
+    // Hover effects via JS for simplicity
+    const opts = modal.querySelectorAll('.share-option');
+    opts.forEach(opt => {
+        opt.onmouseover = () => { opt.style.borderColor = 'var(--color-primary)'; opt.style.background = '#f0f7ff'; };
+        opt.onmouseout = () => { opt.style.borderColor = '#eee'; opt.style.background = '#f8f9fa'; };
+    });
+
+    modal.querySelector('#btn-export').onclick = () => {
         modal.remove();
-        onConfirm();
+        window.startExportFlow(book);
+    };
+
+    modal.querySelector('#btn-coedit').onclick = () => {
+        modal.remove();
+        window.startCoeditFlow(book);
+    };
+
+    setTimeout(() => modal.classList.add('open'), 10);
+};
+
+window.startExportFlow = async (book) => {
+    try {
+        window.showSuccessModal("正在產生代碼...");
+        const result = await SyncManager.createExportCode(book, currentUser?.displayName);
+        window.showExportModal(book.name, result.code, result.expiresAt);
+    } catch (e) {
+        console.error(e);
+        alert("產生代碼失敗");
+    }
+};
+
+window.startCoeditFlow = async (book) => {
+    try {
+        if (book.coeditCode) {
+            window.showCoeditModal(book.name, book.coeditCode, true);
+        } else {
+            // Confirm creation
+            if (!confirm("確定要開啟共編功能嗎？\n這將產生一個永久代碼，擁有此代碼的使用者皆可編輯此單字本。")) return;
+
+            window.showSuccessModal("正在開啟共編...");
+            const code = await SyncManager.initiateCoedit(book, currentUser?.displayName);
+
+            // Update local book state
+            book.coeditCode = code;
+            book.isCoeditOwner = true;
+            book.isCoedit = true;
+            SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+
+            window.showCoeditModal(book.name, code, true);
+        }
+    } catch (e) {
+        console.error(e);
+        alert("開啟共編失敗");
+    }
+};
+
+window.showExportModal = (bookName, code, expiresAt) => {
+    const modalId = 'export-modal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+
+    const updateTimer = () => {
+        const now = new Date();
+        const end = new Date(expiresAt);
+        const left = Math.max(0, Math.floor((end - now) / 1000));
+        const min = Math.floor(left / 60);
+        const sec = left % 60;
+        const el = document.getElementById('export-timer');
+        if (el) el.innerText = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        if (left === 0 && modal.classList.contains('open')) {
+            modal.remove();
+            window.showInfoModal("代碼已失效", "請重新產生代碼");
+        }
+    };
+
+    // Timer interval
+    const timerId = setInterval(updateTimer, 1000);
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center;">
+            <button class="close-modal" onclick="clearInterval(${timerId}); document.getElementById('${modalId}').remove()">&times;</button>
+            <div style="font-size:3rem; margin-bottom:10px;">📤</div>
+            <h3>匯出代碼</h3>
+            <p style="color:#666;">有效時間剩餘：<span id="export-timer" style="color:var(--color-primary); font-weight:bold;">15:00</span></p>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:12px; border:2px dashed #ddd; margin:20px 0; font-weight:bold; font-size:2rem; letter-spacing:4px; user-select:all;" id="share-code-display">
+                ${code}
+            </div>
+            
+            <button class="btn btn-primary" id="copy-code-btn" style="width:100%;">📋 複製代碼</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    updateTimer(); // Initial call
+
+    const copyBtn = modal.querySelector('#copy-code-btn');
+    const codeDisplay = modal.querySelector('#share-code-display');
+    copyBtn.onclick = () => {
+        navigator.clipboard.writeText(codeDisplay.innerText.trim()).then(() => {
+            copyBtn.innerText = "✅ 已複製！";
+            setTimeout(() => copyBtn.innerText = "📋 複製代碼", 2000);
+        });
+    };
+
+    setTimeout(() => modal.classList.add('open'), 10);
+};
+
+window.showCoeditModal = (bookName, code, isActive) => {
+    const modalId = 'coedit-modal';
+    let modal = document.getElementById(modalId);
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal-overlay';
+
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:400px; text-align:center;">
+            <button class="close-modal" onclick="document.getElementById('${modalId}').remove()">&times;</button>
+            <div style="font-size:3rem; margin-bottom:10px;">🤝</div>
+            <h3>共編代碼</h3>
+            <p style="color:#666; margin-bottom:20px;">將此代碼分享給協作者</p>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:12px; border:2px dashed #ddd; margin-bottom:20px; font-weight:bold; font-size:2rem; letter-spacing:4px; user-select:all;" id="share-code-display">
+                ${code}
+            </div>
+            
+            <button class="btn btn-primary" id="copy-code-btn" style="width:100%; margin-bottom:10px;">📋 複製代碼</button>
+            <button class="btn btn-secondary" style="width:100%; color:red; border-color:#ffcdcd; background:#fff5f5;" id="stop-coedit-btn">🛑 停止共編功能</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const copyBtn = modal.querySelector('#copy-code-btn');
+    const codeDisplay = modal.querySelector('#share-code-display');
+    copyBtn.onclick = () => {
+        navigator.clipboard.writeText(codeDisplay.innerText.trim()).then(() => {
+            copyBtn.innerText = "✅ 已複製！";
+            setTimeout(() => copyBtn.innerText = "📋 複製代碼", 2000);
+        });
+    };
+
+    const stopBtn = modal.querySelector('#stop-coedit-btn');
+    stopBtn.onclick = async () => {
+        if (!confirm("確定要停止共編嗎？\n停止後，其他協作者將無法再加入或更新此單字本，且代碼將失效。")) return;
+
+        try {
+            await SyncManager.toggleCoeditStatus(code, false); // Backend update
+
+            // Local update
+            const book = customBooks.find(b => b.coeditCode === code);
+            if (book) {
+                book.coeditCode = null;
+                book.isCoeditOwner = false;
+                SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+            }
+
+            modal.remove();
+            window.showSuccessModal("已停止共編");
+            if (document.querySelector('.nav-link.active')?.dataset.view === 'books') renderCustomBooks();
+
+        } catch (e) {
+            console.error(e);
+            alert("停止失敗");
+        }
     };
 
     setTimeout(() => modal.classList.add('open'), 10);
