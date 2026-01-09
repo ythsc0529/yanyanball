@@ -1911,8 +1911,19 @@ window.showShareModeSelectionModal = (book) => {
 
 window.startExportFlow = async (book) => {
     try {
+        // Check if existing code is still valid (buffer 10s)
+        if (book.exportCodeInfo && new Date(book.exportCodeInfo.expiresAt) > new Date(Date.now() + 10000)) {
+            window.showExportModal(book.name, book.exportCodeInfo.code, book.exportCodeInfo.expiresAt);
+            return;
+        }
+
         window.showSuccessModal("正在產生代碼...");
         const result = await SyncManager.createExportCode(book, currentUser?.displayName);
+
+        // Cache locally and sync
+        book.exportCodeInfo = result;
+        SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+
         window.showExportModal(book.name, result.code, result.expiresAt);
     } catch (e) {
         console.error(e);
