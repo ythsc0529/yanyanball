@@ -1417,6 +1417,46 @@ window.renderBookDetail = (bookId) => {
     // Find words
     const bookWords = vocabularyDatabase.filter(w => book.wordIds.includes(w.id));
 
+    // Co-edit Info
+    let coeditInfoHtml = '';
+    let isOwner = true; // Default to true for local personal books
+    if (book.isCoedit) {
+        // We need to fetch latest metadata? Or maybe just rely on what we have/fetch async?
+        // Since app functionality relies on just 'book' object which is local, 
+        // we might not have 'collaborators' unless we synced it down into 'book' object?
+        // Actually, SyncManager.findSharedBook returns it, but we need to store it in local book?
+        // The current 'book' object in customBooks is minimal.
+        // Let's do a quick async fetch to refresh metadata if connected?
+        // Or just display if we have it. 
+        // Ideally, we should sync this metadata periodically. 
+        // For MVP: Fetch on render (might be slow?) or just display "Collaborators" button?
+        // Let's fetch silently and update UI?
+        // Or simply: when opening book detail, we rely on local data but maybe we can trigger a sync.
+
+        // Wait, the user wants to see "Current Owner and Collaborators". 
+        // The local 'book' object only has 'creatorName'.
+        // We should fetch the shared book info to get the list.
+        SyncManager.findSharedBook(book.coeditCode).then(data => {
+            if (data && data.collaborators) {
+                const collabList = document.getElementById('collab-list-' + book.id);
+                if (collabList) {
+                    collabList.innerHTML = `
+                        <div style="font-size:0.9rem; color:#666; margin-top:5px;">
+                            <span style="font-weight:bold;">👑 擁有者:</span> ${data.creatorName} 
+                            <span style="margin:0 10px;">|</span>
+                            <span style="font-weight:bold;">👥 協作者:</span> ${data.collaborators.join(', ')}
+                        </div>
+                     `;
+                }
+            }
+        });
+
+        coeditInfoHtml = `<div id="collab-list-${book.id}" style="margin-bottom:15px; padding:10px; background:#f8f9fa; border-radius:8px; font-size:0.8rem; color:#999;">正在載入共編資訊...</div>`;
+
+        // Restriction Logic
+        isOwner = book.isCoeditOwner;
+    }
+
     elements.wordList.innerHTML = '';
 
     // Header
@@ -1426,17 +1466,39 @@ window.renderBookDetail = (bookId) => {
     header.style.justifyContent = "space-between";
     header.style.alignItems = "center";
     header.style.marginBottom = "20px";
+    header.style.flexWrap = "wrap";
+
+    // Delete Button Logic
+    let deleteBtn = '';
+    if (book.id !== 'book_favorites') {
+        if (book.isCoedit) {
+            if (isOwner) {
+                // Owner can stop
+                deleteBtn = `<button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.showCoeditModal('${book.name}', '${book.coeditCode}', true)">🛑 管理共編</button>`;
+            } else {
+                // Collaborator CANNOT delete/stop
+                deleteBtn = `<button class="btn btn-secondary" disabled title="共編中無法刪除，請由擁有者關閉" style="opacity:0.5; cursor:not-allowed;">🔒 共編中</button>`;
+            }
+        } else {
+            // Normal delete
+            deleteBtn = `<button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>`;
+        }
+    }
+
     header.innerHTML = `
-        <div style="display:flex; align-items:center; gap:10px;">
-            <button class="icon-btn" onclick="handleNavigation('books')">⬅️</button>
-            <h2 style="margin:0;">${book.name}</h2>
+        <div style="width:100%; margin-bottom:15px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <button class="icon-btn" onclick="handleNavigation('books')">⬅️</button>
+                <h2 style="margin:0;">${book.name}</h2>
+            </div>
+            ${coeditInfoHtml}
         </div>
-        <div style="display:flex; gap:10px;">
+        <div style="display:flex; gap:10px; width:100%; justify-content:flex-end;">
             <button class="btn btn-primary" onclick="window.startBookQuiz('${book.id}')" ${bookWords.length < 4 ? 'disabled title="至少需4個單字"' : ''}>📝 測驗</button>
             <button class="btn btn-secondary" onclick="window.shareBook('${book.id}')" id="share-btn-${book.id}">
-                ${book.coeditCode ? '🤝 共編中' : (book.shareCode ? '🔗 已分享' : '📤 分享')}
+                ${book.coeditCode ? '🤝 共編代碼' : (book.shareCode ? '🔗 已分享' : '📤 分享')}
             </button>
-            ${book.id !== 'book_favorites' ? `<button class="btn btn-secondary" style="background:#fff5f5; color:red; border:1px solid #feb2b2;" onclick="window.deleteBook('${book.id}')">🗑️ 刪除</button>` : ''}
+            ${deleteBtn}
         </div>
     `;
     elements.wordList.appendChild(header);
@@ -1758,6 +1820,11 @@ window.showAddBookConfirmationModal = (bookData, code) => {
         };
         customBooks.push(newBook);
         SyncManager.saveLocalAndSync(currentUser?.uid, 'customBooks', customBooks);
+
+        // If Co-edit, join remote list
+        if (newBook.isCoedit) {
+            SyncManager.joinCoeditBook(code, currentUser?.displayName);
+        }
 
         // Refresh view if currently on books
         const activeView = document.querySelector('.nav-link.active')?.dataset.view;

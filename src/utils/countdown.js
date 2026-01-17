@@ -17,9 +17,29 @@ export class Countdown {
         const distance = this.targetDate - now;
 
         if (distance < 0) {
-            clearInterval(this.timer);
-            this.element.innerHTML = "考試開始！";
-            return;
+            // Check if we passed the 2026 exam date
+            // The original logic just stops.
+            // New Request: If > 2026/1/18, switch to 2027/1/15 (116 GSAT)
+            const current = new Date();
+            const threshold = new Date('2026-01-18T00:00:00');
+
+            if (current > threshold) {
+                // Reset target to 2027/1/15
+                this.targetDate = new Date('2027-01-15T00:00:00').getTime();
+                const newDist = this.targetDate - current.getTime();
+                if (newDist > 0) {
+                    // Recalculate immediately for this frame
+                    distance = newDist;
+                } else {
+                    clearInterval(this.timer);
+                    this.element.innerHTML = "考試開始！";
+                    return;
+                }
+            } else {
+                clearInterval(this.timer);
+                this.element.innerHTML = "考試開始！";
+                return;
+            }
         }
 
         const days = Math.floor(distance / (1000 * 60 * 60 * 24));

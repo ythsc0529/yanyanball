@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, getDocs, arrayUnion } from 'firebase/firestore';
 import { auth } from './firebase';
 
 export const SyncManager = {
@@ -252,6 +252,7 @@ export const SyncManager = {
                 creatorName: userDisplayName || "無名氏",
                 creatorId: auth.currentUser?.uid || "anonymous",
                 originalBookId: book.id,
+                collaborators: [userDisplayName || "無名氏"], // Init with owner
                 createdAt: new Date().toISOString(),
                 lastUpdatedAt: new Date().toISOString()
             };
@@ -331,6 +332,23 @@ export const SyncManager = {
         } catch (e) {
             console.error("Delete shared book error:", e);
             throw e;
+        }
+    },
+
+    // Join Co-edit (Add yourself to collaborators)
+    async joinCoeditBook(code, userDisplayName) {
+        try {
+            const q = query(collection(db, "shared_books"), where("code", "==", code));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+                const docRef = querySnapshot.docs[0].ref;
+                await updateDoc(docRef, {
+                    collaborators: arrayUnion(userDisplayName || "Guest")
+                });
+            }
+        } catch (e) {
+            console.error("Join co-edit error:", e);
+            // Don't throw, just log. It's not critical if name missing.
         }
     }
 };
