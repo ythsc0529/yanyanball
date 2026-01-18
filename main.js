@@ -3,7 +3,7 @@ import { Countdown } from './src/utils/countdown.js';
 import { loginWithGoogle, loginAsGuest, onUserStatusChanged } from './src/auth.js';
 
 // 116 學測 Date (Estimated: 2026/01/20, adjusting as needed)
-const EXAM_DATE = '2027-01-16T09:00:00';
+const EXAM_DATE = '2026-01-20T09:00:00';
 
 console.log("Main.js loaded and running");
 
