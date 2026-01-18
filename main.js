@@ -2,8 +2,8 @@ import './style.css';
 import { Countdown } from './src/utils/countdown.js';
 import { loginWithGoogle, loginAsGuest, onUserStatusChanged } from './src/auth.js';
 
-// 115 學測 Date (Estimated: 2026/01/20, adjusting as needed)
-const EXAM_DATE = '2026-01-17T09:00:00';
+// 116 學測 Date (Estimated: 2026/01/20, adjusting as needed)
+const EXAM_DATE = '2027-01-16T09:00:00';
 
 console.log("Main.js loaded and running");
 
